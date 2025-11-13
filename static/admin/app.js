@@ -104,6 +104,7 @@ const Auth = {
       UI.toggleView(false);
       UserKeys.loadKeys();
       UserKeys.loadStats();
+      CorsSettings.loadSettings();
     } else {
       UI.toggleView(true);
     }
@@ -644,6 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   document.getElementById('loginBtn').onclick = () => Auth.login();
   document.getElementById('logoutBtn').onclick = () => Auth.logout();
+  document.getElementById('logoutBtnTop').onclick = () => Auth.logout();
   
   document.getElementById('userKeyForm').onsubmit = (e) => UserKeys.saveKey(e);
   document.getElementById('userCancelBtn').onclick = () => {
