@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Proxy</title>
+<link rel="stylesheet" href="/static/admin/styles.css">
+</head>
+<body>
+<div id="login" class="auth-container">
+<div class="auth-card">
+<div class="logo-section">
+<svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M12 2L2 7l10 5 10-5-10-5z"/>
+<path d="M2 17l10 5 10-5"/>
+<path d="M2 12l10 5 10-5"/>
+</svg>
+<h1>AI Proxy</h1>
+<p class="subtitle">Sign in to continue</p>
+</div>
+<div class="form-group">
+<label for="username">Username</label>
+<input id="username" type="text" placeholder="Enter your username" autocomplete="username">
+</div>
+<div class="form-group">
+<label for="password">Password</label>
+<input id="password" type="password" placeholder="Enter your password" autocomplete="current-password">
+</div>
+<button id="loginBtn" class="btn-primary">Sign In</button>
+<div id="loginMsg" class="error-msg"></div>
+</div>
+</div>
+
+<div id="app" class="app-container" style="display:none">
+<aside class="sidebar">
+<div class="sidebar-header">
+<svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M12 2L2 7l10 5 10-5-10-5z"/>
+<path d="M2 17l10 5 10-5"/>
+<path d="M2 12l10 5 10-5"/>
+</svg>
+<span class="brand-name">AI Proxy</span>
+</div>
+<nav class="sidebar-nav">
+<a href="#overview" class="nav-item active">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="3" y="3" width="7" height="7"/>
+<rect x="14" y="3" width="7" height="7"/>
+<rect x="14" y="14" width="7" height="7"/>
+<rect x="3" y="14" width="7" height="7"/>
+</svg>
+Overview
+</a>
+<a href="#api-keys" class="nav-item">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+<path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+</svg>
+        API Keys
+</a>
+<a href="#cors-settings" class="nav-item">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<circle cx="12" cy="12" r="10"/>
+<line x1="2" y1="12" x2="22" y2="12"/>
+<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+</svg>
+CORS Settings
+</a>
+</nav>
+<div class="sidebar-footer">
+<button class="theme-toggle" id="themeToggle">
+<svg class="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<circle cx="12" cy="12" r="5"/>
+<line x1="12" y1="1" x2="12" y2="3"/>
+<line x1="12" y1="21" x2="12" y2="23"/>
+<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+<line x1="1" y1="12" x2="3" y2="12"/>
+<line x1="21" y1="12" x2="23" y2="12"/>
+<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+</svg>
+<svg class="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+</svg>
+</button>
+<button id="logoutBtn" class="logout-btn">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+<polyline points="16 17 21 12 16 7"/>
+<line x1="21" y1="12" x2="9" y2="12"/>
+</svg>
+Logout
+</button>
+</div>
+</aside>
+
+<main class="main">
+<section id="overview" class="section active">
+<div class="page-header">
+<h1>Overview</h1>
+<p class="subtitle">Welcome back to AI Proxy</p>
+</div>
+
+<div class="stats-grid">
+<div class="stat-card">
+<div class="stat-icon primary">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+<path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+</svg>
+</div>
+<div class="stat-content">
+<p class="stat-label">Active Keys</p>
+<h2 class="stat-value" id="statsKeys">0</h2>
+</div>
+</div>
+
+<div class="stat-card">
+<div class="stat-icon success">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+</svg>
+</div>
+<div class="stat-content">
+<p class="stat-label">Total Requests</p>
+<h2 class="stat-value" id="statsRequests">0</h2>
+</div>
+</div>
+
+<div class="stat-card">
+<div class="stat-icon warning">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+</svg>
+</div>
+<div class="stat-content">
+<p class="stat-label">Tokens Used</p>
+<h2 class="stat-value" id="statsTokens">0</h2>
+</div>
+      </div>
+</div>
+
+<div class="card">
+<div class="card-header">
+<h3>Usage Statistics</h3>
+</div>
+<div class="card-content">
+<canvas id="usageChart"></canvas>
+</div>
+</div>
+</section><section id="api-keys" class="section">
+<div class="page-header">
+<h2>API Keys</h2>
+<p class="subtitle">Generate and manage API keys</p>
+</div>
+
+<div class="card form-card">
+<div class="card-header">
+<h3 id="userFormTitle">Generate New API Key</h3>
+</div>
+<div class="card-content">
+<form id="userKeyForm" class="key-form">
+<input id="user_edit_id" type="hidden">
+<div class="form-row">
+<div class="form-group">
+<label for="user_name">Key Name</label>
+<input id="user_name" type="text" placeholder="e.g., Production App, Dev Environment" required>
+</div>
+<div class="form-group checkbox-group">
+<label class="checkbox-label">
+<input id="user_enabled" type="checkbox" checked>
+<span class="checkbox-custom"></span>
+<span>Enabled</span>
+</label>
+</div>
+</div>
+<div class="limits-section">
+<div class="limit-group">
+<label class="checkbox-label">
+<input id="rate_limit_enabled" type="checkbox">
+<span class="checkbox-custom"></span>
+<span class="limit-label">Rate Limit</span>
+</label>
+<div class="form-group limit-input">
+<input id="user_rate" type="number" min="1" placeholder="Requests per minute" disabled>
+</div>
+</div>
+<div class="limit-group">
+<label class="checkbox-label">
+<input id="token_limit_enabled" type="checkbox">
+<span class="checkbox-custom"></span>
+<span class="limit-label">Token Limit</span>
+</label>
+<div class="form-group limit-input">
+<input id="user_tokens" type="number" min="1" placeholder="Tokens per day" disabled>
+</div>
+</div>
+</div>
+<div class="form-actions">
+<button type="button" id="userCancelBtn" class="btn-secondary" style="display:none">Cancel</button>
+<button type="submit" id="userAddBtn" class="btn-primary">Generate Key</button>
+</div>
+</form>
+</div>
+</div>
+
+<div class="card">
+<div class="card-header">
+<h3>Generated Keys</h3>
+</div>
+<div class="card-content">
+<div class="table-wrapper">
+<table id="userKeys">
+<thead>
+<tr>
+<th>Name</th>
+<th>API Key</th>
+<th>Rate Limit</th>
+<th>Token Limit</th>
+<th>Status</th>
+<th>Created</th>
+<th class="actions-col">Actions</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+<div id="userEmptyState" class="empty-state" style="display:none">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+<circle cx="8.5" cy="7" r="4"/>
+<line x1="20" y1="8" x2="20" y2="14"/>
+<line x1="23" y1="11" x2="17" y2="11"/>
+</svg>
+<p>No user API keys generated yet</p>
+<span>Generate your first key to get started</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="documentation" class="section">
+<div class="page-header">
+<h2>Documentation</h2>
+<p class="subtitle">API reference and examples</p>
+</div>
+
+<div class="card">
+<div class="card-header">
+<h3>Getting Started</h3>
+</div>
+<div class="card-content">
+<div class="doc-section">
+<h4>Base URL</h4>
+<div class="code-block">
+<code>https://your-domain.com/api/proxy</code>
+<button class="copy-btn" data-copy="https://your-domain.com/api/proxy">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+</svg>
+</button>
+</div>
+</div>
+
+<div class="doc-section">
+<h4>Authentication</h4>
+<p>Include your API key in the Authorization header:</p>
+<div class="code-block">
+<code>Authorization: Bearer YOUR_API_KEY</code>
+<button class="copy-btn" data-copy="Authorization: Bearer YOUR_API_KEY">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+</svg>
+</button>
+</div>
+</div>
+
+<div class="doc-section">
+<h4>Example Request</h4>
+<div class="code-block multi-line">
+<pre>curl -X POST https://your-domain.com/api/proxy/chat/completions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'</pre>
+<button class="copy-btn" data-copy='curl -X POST https://your-domain.com/api/proxy/chat/completions -H "Authorization: Bearer YOUR_API_KEY" -H "Content-Type: application/json" -d '"'"'{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello!"}]}'"'"''>
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+</svg>
+</button>
+</div>
+</div>
+
+<div class="doc-section">
+<h4>Upstream Provider</h4>
+<p>All requests are proxied to ai.hackclub.com</p>
+<div class="code-block">
+<code>https://ai.hackclub.com/proxy/v1/chat/completions</code>
+</div>
+</div>
+      </div>
+</div>
+</section>
+
+<section id="cors-settings" class="section">
+<div class="page-header">
+<h2>CORS Settings</h2>
+<p class="subtitle">Configure Cross-Origin Resource Sharing policies</p>
+</div>
+
+<div class="card form-card">
+<div class="card-header">
+<h3>CORS Configuration</h3>
+</div>
+<div class="card-content">
+<div class="cors-presets">
+<h4>Quick Presets</h4>
+<div class="preset-buttons">
+<button type="button" class="preset-btn" data-preset="development">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<circle cx="12" cy="12" r="10"/>
+<line x1="12" y1="8" x2="12" y2="12"/>
+<line x1="12" y1="16" x2="12.01" y2="16"/>
+</svg>
+Development (Allow All)
+</button>
+<button type="button" class="preset-btn" data-preset="production">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+<path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+</svg>
+Production (Restricted)
+</button>
+<button type="button" class="preset-btn" data-preset="localhost">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+<circle cx="12" cy="7" r="4"/>
+</svg>
+Local Development
+</button>
+</div>
+</div>
+
+<form id="corsForm" class="key-form">
+<div class="form-group">
+<label for="cors_origins">Allowed Origins</label>
+<div class="origin-list-container">
+<div id="originList" class="origin-items"></div>
+<div class="origin-add-form">
+<input id="newOriginInput" type="text" placeholder="https://example.com or * for all">
+<button type="button" id="addOriginBtn" class="btn-add-origin">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<line x1="12" y1="5" x2="12" y2="19"/>
+<line x1="5" y1="12" x2="19" y2="12"/>
+</svg>
+Add Origin
+</button>
+</div>
+</div>
+<input id="cors_origins" type="hidden" required>
+<small class="form-help">Add allowed origins one by one, or use * to allow all domains</small>
+<div class="common-helpers">
+<label class="helper-checkbox">
+<input type="checkbox" class="origin-quick-add" data-value="http://localhost:3000">
+<span>localhost:3000</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="origin-quick-add" data-value="http://localhost:5173">
+<span>localhost:5173 (Vite)</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="origin-quick-add" data-value="http://localhost:8080">
+<span>localhost:8080</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="origin-quick-add" data-value="http://127.0.0.1:3000">
+<span>127.0.0.1:3000</span>
+</label>
+</div>
+</div>
+
+<div class="form-group">
+<label for="cors_methods">Allowed Methods</label>
+<input id="cors_methods" type="text" placeholder="GET,POST,PUT,DELETE,OPTIONS" required>
+<small class="form-help">Comma-separated list of HTTP methods</small>
+<div class="common-helpers">
+<label class="helper-checkbox">
+<input type="checkbox" class="method-helper" data-value="GET" checked>
+<span>GET</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="method-helper" data-value="POST" checked>
+<span>POST</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="method-helper" data-value="PUT" checked>
+<span>PUT</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="method-helper" data-value="DELETE" checked>
+<span>DELETE</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="method-helper" data-value="PATCH">
+<span>PATCH</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="method-helper" data-value="OPTIONS" checked>
+<span>OPTIONS</span>
+</label>
+</div>
+</div>
+
+<div class="form-group">
+<label for="cors_headers">Allowed Headers</label>
+<input id="cors_headers" type="text" placeholder="* or Content-Type,Authorization" required>
+<small class="form-help">Use * to allow all headers, or comma-separated list</small>
+<div class="common-helpers">
+<label class="helper-checkbox">
+<input type="checkbox" class="header-helper" data-value="Content-Type" checked>
+<span>Content-Type</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="header-helper" data-value="Authorization" checked>
+<span>Authorization</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="header-helper" data-value="X-Requested-With">
+<span>X-Requested-With</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="header-helper" data-value="Accept">
+<span>Accept</span>
+</label>
+<label class="helper-checkbox">
+<input type="checkbox" class="header-helper" data-value="X-API-Key">
+<span>X-API-Key</span>
+</label>
+</div>
+</div>
+
+<div class="form-row">
+<div class="form-group checkbox-group">
+<label class="checkbox-label">
+<input id="cors_credentials" type="checkbox">
+<span class="checkbox-custom"></span>
+<span>Allow Credentials</span>
+</label>
+<small class="form-help">Allow cookies and authentication headers</small>
+</div>
+
+<div class="form-group">
+<label for="cors_max_age">Max Age (seconds)</label>
+<input id="cors_max_age" type="number" min="0" placeholder="3600" required>
+<small class="form-help">How long browsers can cache preflight requests</small>
+</div>
+</div>
+
+<div class="form-actions">
+<button type="submit" class="btn-primary">Save CORS Settings</button>
+</div>
+</form>
+</div>
+</div>
+
+<div class="card">
+<div class="card-header">
+<h3>CORS Information</h3>
+</div>
+<div class="card-content">
+<div class="info-section">
+<h4>What is CORS?</h4>
+<p>Cross-Origin Resource Sharing (CORS) is a security feature that controls which websites can access your API from a browser.</p>
+</div>
+
+<div class="info-section">
+<h4>Common Configurations</h4>
+<div class="config-examples">
+<div class="config-example">
+<strong>Allow All (Development)</strong>
+<code>Origins: *</code>
+<p>Allows requests from any domain. Use only for testing.</p>
+</div>
+<div class="config-example">
+<strong>Specific Domains (Production)</strong>
+<code>Origins: https://app.example.com,https://www.example.com</code>
+<p>Restricts access to specific trusted domains.</p>
+</div>
+<div class="config-example">
+<strong>With Credentials</strong>
+<code>Origins: https://app.example.com</code><br>
+<code>Allow Credentials: Enabled</code>
+<p>Allows cookies and auth headers. Origins cannot be *.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div><div id="toast" class="toast"></div>
+<div id="keyModal" class="modal">
+<div class="modal-content">
+<div class="modal-header">
+<h3>API Key Generated</h3>
+<button class="modal-close">&times;</button>
+</div>
+<div class="modal-body">
+<p>Save this API key now. You won't be able to see it again!</p>
+<div class="key-display">
+<code id="generatedKey"></code>
+<button id="copyKeyBtn" class="btn-copy">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+</svg>
+Copy
+</button>
+</div>
+</div>
+<div class="modal-footer">
+<button id="modalCloseBtn" class="btn-primary">I've saved it</button>
+</div>
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/admin/app.js"></script>
+</body>
+</html>
