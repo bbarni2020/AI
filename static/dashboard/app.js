@@ -66,10 +66,45 @@ const App = {
         document.getElementById('statsKeys').textContent = stats.keys || 0;
         document.getElementById('statsRequests').textContent = this.formatNumber(stats.requests || 0);
         document.getElementById('statsTokens').textContent = this.formatNumber(stats.tokens || 0);
+        if (stats.graph) this.renderUsageGraph(stats.graph);
       }
     } catch (err) {
       console.error('Failed to load stats:', err);
     }
+  },
+
+  renderUsageGraph(arr) {
+    const c = document.getElementById('usageChart');
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const w = c.width;
+    const h = c.height;
+    ctx.clearRect(0,0,w,h);
+    const pad = 30;
+    const maxTokens = Math.max(...arr.map(x=>x.tokens),1);
+    const maxReq = Math.max(...arr.map(x=>x.requests),1);
+    const barW = (w - pad*2) / arr.length * 0.5;
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#666';
+    ctx.fillText('Tokens', pad, 12);
+    ctx.fillText('Requests', pad+70, 12);
+    arr.forEach((d,i)=>{
+      const xBase = pad + i * (w - pad*2) / arr.length + ((w - pad*2) / arr.length - barW*2)/2;
+      const hTokens = (d.tokens / maxTokens) * (h - pad*2);
+      const hReq = (d.requests / maxReq) * (h - pad*2);
+      ctx.fillStyle = '#2d7ef0';
+      ctx.fillRect(xBase, h - pad - hTokens, barW, hTokens);
+      ctx.fillStyle = '#f0a22d';
+      ctx.fillRect(xBase+barW, h - pad - hReq, barW, hReq);
+      ctx.fillStyle = '#444';
+      ctx.textAlign = 'center';
+      ctx.fillText(d.date.slice(5), xBase+barW, h - 8);
+    });
+    ctx.strokeStyle = '#ccc';
+    ctx.beginPath();
+    ctx.moveTo(pad, h - pad);
+    ctx.lineTo(w - pad, h - pad);
+    ctx.stroke();
   },
   
   formatNumber(num) {

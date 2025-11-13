@@ -2,8 +2,9 @@ import os
 import json
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, make_response
+from sqlalchemy import func, cast, Date
 from .models import UsageLog, CorsSettings, UserKey, ProviderKey
 from .utils import extract_tokens
 from . import db
@@ -65,6 +66,26 @@ def list_models():
     refresh = request.args.get('refresh') == '1'
     items = fetch_models(force=refresh)
     response = make_response(jsonify({'models': items, 'count': len(items)}), 200)
+    return apply_cors_headers(response)
+
+@api_bp.get('/api/stats')
+def stats():
+    keys = UserKey.query.filter_by(enabled=True).count()
+    requests_count = db.session.query(func.count(UsageLog.id)).scalar() or 0
+    tokens_sum = db.session.query(func.coalesce(func.sum(UsageLog.total_tokens), 0)).scalar() or 0
+    today = datetime.utcnow().date()
+    start_day = today - timedelta(days=6)
+    q = db.session.query(
+        cast(UsageLog.ts, Date).label('d'),
+        func.count(UsageLog.id).label('r'),
+        func.coalesce(func.sum(UsageLog.total_tokens), 0).label('t')
+    ).filter(UsageLog.ts >= datetime.combine(start_day, datetime.min.time())).group_by(cast(UsageLog.ts, Date)).order_by(cast(UsageLog.ts, Date).asc()).all()
+    got = {row.d: {'date': row.d.isoformat(), 'requests': row.r, 'tokens': row.t} for row in q}
+    graph = []
+    for i in range(7):
+        d = start_day + timedelta(days=i)
+        graph.append(got.get(d, {'date': d.isoformat(), 'requests': 0, 'tokens': 0}))
+    response = make_response(jsonify({'keys': keys, 'requests': requests_count, 'tokens': tokens_sum, 'graph': graph}), 200)
     return apply_cors_headers(response)
 
 def apply_cors_headers(response):
