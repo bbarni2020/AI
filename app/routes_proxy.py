@@ -128,7 +128,23 @@ def proxy_chat():
     if not user_key:
         return jsonify({'error': 'unauthorized', 'message': 'Invalid or disabled API key'}), 401
     
-    user_key.last_used_at = datetime.utcnow()
+    now = datetime.utcnow()
+    
+    if user_key.rate_limit_enabled and user_key.rate_limit_value > 0:
+        period_seconds = {'second': 1, 'minute': 60, 'hour': 3600, 'day': 86400, 'week': 604800, 'month': 2592000}.get(user_key.rate_limit_period, 60)
+        start_time = now - timedelta(seconds=period_seconds)
+        count = db.session.query(func.count(UsageLog.id)).filter(UsageLog.user_key_id == user_key.id, UsageLog.ts >= start_time).scalar() or 0
+        if count >= user_key.rate_limit_value:
+            return jsonify({'error': 'rate_limit_exceeded', 'message': f'Rate limit of {user_key.rate_limit_value} requests per {user_key.rate_limit_period} exceeded'}), 429
+    
+    if user_key.token_limit_enabled and user_key.token_limit_value > 0:
+        period_seconds = {'second': 1, 'minute': 60, 'hour': 3600, 'day': 86400, 'week': 604800, 'month': 2592000}.get(user_key.token_limit_period, 86400)
+        start_time = now - timedelta(seconds=period_seconds)
+        token_count = db.session.query(func.coalesce(func.sum(UsageLog.total_tokens), 0)).filter(UsageLog.user_key_id == user_key.id, UsageLog.ts >= start_time).scalar() or 0
+        if token_count >= user_key.token_limit_value:
+            return jsonify({'error': 'token_limit_exceeded', 'message': f'Token limit of {user_key.token_limit_value} tokens per {user_key.token_limit_period} exceeded'}), 429
+    
+    user_key.last_used_at = now
     db.session.commit()
     
     body = request.get_json(force=True)
@@ -159,13 +175,13 @@ def proxy_chat():
     if 'application/json' in ct:
         data = resp.json()
         pt, rt, tt = extract_tokens(data)
-        ul = UsageLog(provider_key_id=provider_id, request_tokens=pt, response_tokens=rt, total_tokens=tt)
+        ul = UsageLog(provider_key_id=provider_id, user_key_id=user_key.id, request_tokens=pt, response_tokens=rt, total_tokens=tt)
         db.session.add(ul)
         db.session.commit()
         response = make_response(jsonify(data), resp.status_code)
         return apply_cors_headers(response)
     
-    ul = UsageLog(provider_key_id=provider_id)
+    ul = UsageLog(provider_key_id=provider_id, user_key_id=user_key.id)
     db.session.add(ul)
     db.session.commit()
     response = make_response(resp.content, resp.status_code, {'Content-Type': ct})

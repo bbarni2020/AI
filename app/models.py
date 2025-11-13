@@ -18,16 +18,21 @@ class UserKey(db.Model):
     name = db.Column(db.String(120), nullable=False)
     enabled = db.Column(db.Boolean, default=True, nullable=False)
     rate_limit_enabled = db.Column(db.Boolean, default=False, nullable=False)
-    rate_limit_per_min = db.Column(db.Integer, default=0, nullable=False)
+    rate_limit_value = db.Column(db.Integer, default=0, nullable=False)
+    rate_limit_period = db.Column(db.String(20), default='minute', nullable=False)
     token_limit_enabled = db.Column(db.Boolean, default=False, nullable=False)
-    token_limit_per_day = db.Column(db.Integer, default=0, nullable=False)
+    token_limit_value = db.Column(db.Integer, default=0, nullable=False)
+    token_limit_period = db.Column(db.String(20), default='day', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
     last_used_at = db.Column(db.DateTime, nullable=True)
+    rate_limit_per_min = db.Column(db.Integer, default=0, nullable=False)
+    token_limit_per_day = db.Column(db.Integer, default=0, nullable=False)
 
 class UsageLog(db.Model):
     __tablename__ = 'usage_logs'
     id = db.Column(db.Integer, primary_key=True)
     provider_key_id = db.Column(db.Integer, db.ForeignKey('provider_keys.id'), nullable=False)
+    user_key_id = db.Column(db.Integer, db.ForeignKey('user_keys.id'), nullable=True)
     ts = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
     request_tokens = db.Column(db.Integer, default=0, nullable=False)
     response_tokens = db.Column(db.Integer, default=0, nullable=False)

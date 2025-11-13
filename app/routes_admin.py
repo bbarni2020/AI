@@ -40,21 +40,29 @@ def list_user_keys():
     if 'admin' not in session:
         return jsonify({'error': 'unauthorized'}), 401
     rows = UserKey.query.order_by(UserKey.id.desc()).all()
-    return jsonify([
-        {
+    result = []
+    for r in rows:
+        total_requests = db.session.query(func.count(UsageLog.id)).filter(UsageLog.user_key_id == r.id).scalar() or 0
+        total_tokens = db.session.query(func.coalesce(func.sum(UsageLog.total_tokens), 0)).filter(UsageLog.user_key_id == r.id).scalar() or 0
+        result.append({
             'id': r.id,
             'name': r.name,
             'key': mask_key(r.key),
             'enabled': r.enabled,
             'rate_limit_enabled': r.rate_limit_enabled,
+            'rate_limit_value': r.rate_limit_value,
+            'rate_limit_period': r.rate_limit_period,
             'rate_limit_per_min': r.rate_limit_per_min,
             'token_limit_enabled': r.token_limit_enabled,
+            'token_limit_value': r.token_limit_value,
+            'token_limit_period': r.token_limit_period,
             'token_limit_per_day': r.token_limit_per_day,
             'created_at': r.created_at.isoformat(),
             'last_used_at': r.last_used_at.isoformat() if r.last_used_at else None,
-        }
-        for r in rows
-    ])
+            'total_requests': total_requests,
+            'total_tokens': total_tokens,
+        })
+    return jsonify(result)
 
 @admin_bp.post('/user-keys')
 def create_user_key():
@@ -67,8 +75,12 @@ def create_user_key():
         name=data.get('name', ''),
         enabled=bool(data.get('enabled', True)),
         rate_limit_enabled=bool(data.get('rate_limit_enabled', False)),
-        rate_limit_per_min=int(data.get('rate_limit_per_min') or 0),
+        rate_limit_value=int(data.get('rate_limit_value') or 0),
+        rate_limit_period=data.get('rate_limit_period', 'minute'),
         token_limit_enabled=bool(data.get('token_limit_enabled', False)),
+        token_limit_value=int(data.get('token_limit_value') or 0),
+        token_limit_period=data.get('token_limit_period', 'day'),
+        rate_limit_per_min=int(data.get('rate_limit_per_min') or 0),
         token_limit_per_day=int(data.get('token_limit_per_day') or 0),
     )
     db.session.add(r)
@@ -87,10 +99,18 @@ def update_user_key(kid):
         r.enabled = bool(data['enabled'])
     if 'rate_limit_enabled' in data:
         r.rate_limit_enabled = bool(data['rate_limit_enabled'])
+    if 'rate_limit_value' in data:
+        r.rate_limit_value = int(data['rate_limit_value'] or 0)
+    if 'rate_limit_period' in data:
+        r.rate_limit_period = data['rate_limit_period']
     if 'rate_limit_per_min' in data:
         r.rate_limit_per_min = int(data['rate_limit_per_min'] or 0)
     if 'token_limit_enabled' in data:
         r.token_limit_enabled = bool(data['token_limit_enabled'])
+    if 'token_limit_value' in data:
+        r.token_limit_value = int(data['token_limit_value'] or 0)
+    if 'token_limit_period' in data:
+        r.token_limit_period = data['token_limit_period']
     if 'token_limit_per_day' in data:
         r.token_limit_per_day = int(data['token_limit_per_day'] or 0)
     db.session.commit()
@@ -104,6 +124,44 @@ def delete_user_key(kid):
     db.session.delete(r)
     db.session.commit()
     return jsonify({'ok': True})
+
+@admin_bp.get('/user-keys/<int:kid>/stats')
+def get_user_key_stats(kid):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    user_key = UserKey.query.get_or_404(kid)
+    
+    total_requests = db.session.query(func.count(UsageLog.id)).filter(UsageLog.user_key_id == kid).scalar() or 0
+    total_tokens = db.session.query(func.coalesce(func.sum(UsageLog.total_tokens), 0)).filter(UsageLog.user_key_id == kid).scalar() or 0
+    
+    last_7_days = datetime.utcnow().date() - timedelta(days=6)
+    logs = db.session.query(UsageLog.ts, UsageLog.total_tokens).filter(
+        UsageLog.user_key_id == kid,
+        UsageLog.ts >= datetime.combine(last_7_days, datetime.min.time())
+    ).order_by(UsageLog.ts.desc()).limit(100).all()
+    
+    usage_by_day = {}
+    for ts, tokens in logs:
+        d = ts.date()
+        if d not in usage_by_day:
+            usage_by_day[d] = {'date': d.isoformat(), 'requests': 0, 'tokens': 0}
+        usage_by_day[d]['requests'] += 1
+        usage_by_day[d]['tokens'] += int(tokens or 0)
+    
+    graph = []
+    for i in range(7):
+        d = last_7_days + timedelta(days=i)
+        graph.append(usage_by_day.get(d, {'date': d.isoformat(), 'requests': 0, 'tokens': 0}))
+    
+    recent_logs = [{'timestamp': log.ts.isoformat(), 'tokens': log.total_tokens} for log in logs[:20]]
+    
+    return jsonify({
+        'total_requests': total_requests,
+        'total_tokens': total_tokens,
+        'graph': graph,
+        'recent': recent_logs
+    })
 
 @admin_bp.get('/usage')
 def get_usage():

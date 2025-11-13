@@ -311,14 +311,15 @@ const UserKeys = {
       const statusText = key.enabled ? 'Active' : 'Disabled';
       
       const rateLimit = key.rate_limit_enabled 
-        ? `${key.rate_limit_per_min}/min` 
+        ? `${key.rate_limit_value || key.rate_limit_per_min}/${key.rate_limit_period || 'min'}` 
         : '<span class="text-muted">None</span>';
       
       const tokenLimit = key.token_limit_enabled 
-        ? `${key.token_limit_per_day}/day` 
+        ? `${key.token_limit_value || key.token_limit_per_day}/${key.token_limit_period || 'day'}` 
         : '<span class="text-muted">None</span>';
       
       const created = new Date(key.created_at).toLocaleDateString();
+      const stats = `<span class="key-stats">${key.total_requests || 0} reqs / ${(key.total_tokens || 0).toLocaleString()} tokens</span>`;
       
       row.innerHTML = `
         <td><strong>${this.escapeHtml(key.name)}</strong></td>
@@ -326,9 +327,11 @@ const UserKeys = {
         <td>${rateLimit}</td>
         <td>${tokenLimit}</td>
         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+        <td>${stats}</td>
         <td>${created}</td>
         <td>
           <div class="table-actions">
+            <button class="btn-stats" data-id="${key.id}">Stats</button>
             <button class="btn-edit" data-id="${key.id}">Edit</button>
             <button class="btn-delete" data-id="${key.id}">Delete</button>
           </div>
@@ -338,6 +341,10 @@ const UserKeys = {
       tbody.appendChild(row);
     });
     
+    tbody.querySelectorAll('.btn-stats').forEach(btn => {
+      btn.onclick = () => this.showKeyStats(btn.dataset.id);
+    });
+    
     tbody.querySelectorAll('.btn-edit').forEach(btn => {
       btn.onclick = () => this.editKey(btn.dataset.id);
     });
@@ -345,6 +352,75 @@ const UserKeys = {
     tbody.querySelectorAll('.btn-delete').forEach(btn => {
       btn.onclick = () => this.deleteKey(btn.dataset.id);
     });
+  },
+  
+  async showKeyStats(keyId) {
+    const key = this.currentKeys.find(k => k.id == keyId);
+    if (!key) return;
+    
+    const result = await API.request(`/admin/user-keys/${keyId}/stats`);
+    if (result.status === 200 && result.data) {
+      document.getElementById('statsModalTitle').textContent = `${key.name} - Statistics`;
+      document.getElementById('modalTotalRequests').textContent = (result.data.total_requests || 0).toLocaleString();
+      document.getElementById('modalTotalTokens').textContent = (result.data.total_tokens || 0).toLocaleString();
+      
+      if (result.data.graph) {
+        this.renderModalChart(result.data.graph);
+      }
+      
+      const activityHtml = result.data.recent && result.data.recent.length > 0
+        ? result.data.recent.map(log => `
+            <div class="activity-item">
+              <span class="activity-time">${new Date(log.timestamp).toLocaleString()}</span>
+              <span class="activity-tokens">${log.tokens.toLocaleString()} tokens</span>
+            </div>
+          `).join('')
+        : '<p class="empty-message">No recent activity</p>';
+      
+      document.getElementById('modalRecentActivity').innerHTML = activityHtml;
+      document.getElementById('keyStatsModal').style.display = 'flex';
+    }
+  },
+  
+  renderModalChart(arr) {
+    const c = document.getElementById('modalUsageChart');
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const w = c.width;
+    const h = c.height;
+    ctx.clearRect(0, 0, w, h);
+    const pad = 40;
+    const maxTokens = Math.max(...arr.map(x => x.tokens), 1);
+    const maxReq = Math.max(...arr.map(x => x.requests), 1);
+    const barW = (w - pad * 2) / arr.length * 0.4;
+    
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#666';
+    ctx.fillText('Tokens', pad, 15);
+    ctx.fillText('Requests', pad + 70, 15);
+    
+    arr.forEach((d, i) => {
+      const xBase = pad + i * (w - pad * 2) / arr.length + ((w - pad * 2) / arr.length - barW * 2) / 2;
+      const hTokens = (d.tokens / maxTokens) * (h - pad * 2);
+      const hReq = (d.requests / maxReq) * (h - pad * 2);
+      
+      ctx.fillStyle = '#6366f1';
+      ctx.fillRect(xBase, h - pad - hTokens, barW, hTokens);
+      ctx.fillStyle = '#10b981';
+      ctx.fillRect(xBase + barW, h - pad - hReq, barW, hReq);
+      
+      ctx.fillStyle = '#666';
+      ctx.textAlign = 'center';
+      ctx.font = '11px sans-serif';
+      ctx.fillText(d.date.slice(5), xBase + barW, h - 10);
+    });
+    
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad, h - pad);
+    ctx.lineTo(w - pad, h - pad);
+    ctx.stroke();
   },
   
   async saveKey(event) {
@@ -358,8 +434,12 @@ const UserKeys = {
       name: document.getElementById('user_name').value.trim(),
       enabled: document.getElementById('user_enabled').checked,
       rate_limit_enabled: rateLimitEnabled,
+      rate_limit_value: rateLimitEnabled ? (parseInt(document.getElementById('user_rate').value) || 0) : 0,
+      rate_limit_period: rateLimitEnabled ? (document.getElementById('user_rate_period')?.value || 'minute') : 'minute',
       rate_limit_per_min: rateLimitEnabled ? (parseInt(document.getElementById('user_rate').value) || 0) : 0,
       token_limit_enabled: tokenLimitEnabled,
+      token_limit_value: tokenLimitEnabled ? (parseInt(document.getElementById('user_tokens').value) || 0) : 0,
+      token_limit_period: tokenLimitEnabled ? (document.getElementById('user_token_period')?.value || 'day') : 'day',
       token_limit_per_day: tokenLimitEnabled ? (parseInt(document.getElementById('user_tokens').value) || 0) : 0
     };
     
@@ -368,12 +448,12 @@ const UserKeys = {
       return;
     }
     
-    if (rateLimitEnabled && keyData.rate_limit_per_min < 1) {
+    if (rateLimitEnabled && keyData.rate_limit_value < 1) {
       UI.showToast('Rate limit must be at least 1', 'error');
       return;
     }
     
-    if (tokenLimitEnabled && keyData.token_limit_per_day < 1) {
+    if (tokenLimitEnabled && keyData.token_limit_value < 1) {
       UI.showToast('Token limit must be at least 1', 'error');
       return;
     }
@@ -406,12 +486,20 @@ const UserKeys = {
     document.getElementById('user_enabled').checked = key.enabled;
     
     document.getElementById('rate_limit_enabled').checked = key.rate_limit_enabled;
-    document.getElementById('user_rate').value = key.rate_limit_per_min || '';
+    document.getElementById('user_rate').value = key.rate_limit_value || key.rate_limit_per_min || '';
     document.getElementById('user_rate').disabled = !key.rate_limit_enabled;
+    if (document.getElementById('user_rate_period')) {
+      document.getElementById('user_rate_period').value = key.rate_limit_period || 'minute';
+      document.getElementById('user_rate_period').disabled = !key.rate_limit_enabled;
+    }
     
     document.getElementById('token_limit_enabled').checked = key.token_limit_enabled;
-    document.getElementById('user_tokens').value = key.token_limit_per_day || '';
+    document.getElementById('user_tokens').value = key.token_limit_value || key.token_limit_per_day || '';
     document.getElementById('user_tokens').disabled = !key.token_limit_enabled;
+    if (document.getElementById('user_token_period')) {
+      document.getElementById('user_token_period').value = key.token_limit_period || 'day';
+      document.getElementById('user_token_period').disabled = !key.token_limit_enabled;
+    }
     
     UI.updateFormMode(true);
     
@@ -703,11 +791,13 @@ document.addEventListener('DOMContentLoaded', () => {
   
   document.getElementById('rate_limit_enabled').onchange = (e) => {
     document.getElementById('user_rate').disabled = !e.target.checked;
+    document.getElementById('user_rate_period').disabled = !e.target.checked;
     if (e.target.checked) document.getElementById('user_rate').focus();
   };
   
   document.getElementById('token_limit_enabled').onchange = (e) => {
     document.getElementById('user_tokens').disabled = !e.target.checked;
+    document.getElementById('user_token_period').disabled = !e.target.checked;
     if (e.target.checked) document.getElementById('user_tokens').focus();
   };
   
@@ -715,7 +805,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') Auth.login();
   };
   
-  document.querySelector('.modal-close').onclick = () => UI.hideModal();
+  document.querySelectorAll('.modal-close').forEach(btn => {
+    btn.onclick = () => {
+      document.getElementById('keyModal')?.style.display = 'none';
+      document.getElementById('keyStatsModal')?.style.display = 'none';
+    };
+  });
   document.getElementById('modalCloseBtn').onclick = () => UI.hideModal();
   
   document.getElementById('copyKeyBtn').onclick = () => {

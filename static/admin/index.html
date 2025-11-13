@@ -194,8 +194,16 @@ Logout
 <span class="checkbox-custom"></span>
 <span class="limit-label">Rate Limit</span>
 </label>
-<div class="form-group limit-input">
-<input id="user_rate" type="number" min="1" placeholder="Requests per minute" disabled>
+<div class="limit-input-row">
+<input id="user_rate" type="number" min="1" placeholder="Value" disabled>
+<select id="user_rate_period" disabled>
+<option value="second">per second</option>
+<option value="minute" selected>per minute</option>
+<option value="hour">per hour</option>
+<option value="day">per day</option>
+<option value="week">per week</option>
+<option value="month">per month</option>
+</select>
 </div>
 </div>
 <div class="limit-group">
@@ -204,8 +212,16 @@ Logout
 <span class="checkbox-custom"></span>
 <span class="limit-label">Token Limit</span>
 </label>
-<div class="form-group limit-input">
-<input id="user_tokens" type="number" min="1" placeholder="Tokens per day" disabled>
+<div class="limit-input-row">
+<input id="user_tokens" type="number" min="1" placeholder="Value" disabled>
+<select id="user_token_period" disabled>
+<option value="second">per second</option>
+<option value="minute">per minute</option>
+<option value="hour">per hour</option>
+<option value="day" selected>per day</option>
+<option value="week">per week</option>
+<option value="month">per month</option>
+</select>
 </div>
 </div>
 </div>
@@ -231,6 +247,7 @@ Logout
 <th>Rate Limit</th>
 <th>Token Limit</th>
 <th>Status</th>
+<th>Usage Stats</th>
 <th>Created</th>
 <th class="actions-col">Actions</th>
 </tr>
@@ -247,6 +264,38 @@ Logout
 <p>No user API keys generated yet</p>
 <span>Generate your first key to get started</span>
 </div>
+</div>
+</div>
+</div>
+
+<div id="keyStatsModal" class="modal" style="display:none">
+<div class="modal-content">
+<div class="modal-header">
+<h3 id="statsModalTitle">API Key Statistics</h3>
+<button class="modal-close">&times;</button>
+</div>
+<div class="modal-body">
+<div class="stats-grid-modal">
+<div class="stat-card-small">
+<span class="stat-label-small">Total Requests</span>
+<strong class="stat-value-small" id="modalTotalRequests">0</strong>
+</div>
+<div class="stat-card-small">
+<span class="stat-label-small">Total Tokens</span>
+<strong class="stat-value-small" id="modalTotalTokens">0</strong>
+</div>
+</div>
+<div class="chart-container">
+<h4>7-Day Activity</h4>
+<canvas id="modalUsageChart" width="700" height="250"></canvas>
+</div>
+<div class="recent-activity">
+<h4>Recent Usage</h4>
+<div id="modalRecentActivity" class="activity-list"></div>
+</div>
+</div>
+<div class="modal-footer">
+<button class="btn-secondary" onclick="document.getElementById('keyStatsModal').style.display='none'">Close</button>
 </div>
 </div>
 </div>
