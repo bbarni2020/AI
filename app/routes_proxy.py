@@ -4,7 +4,7 @@ import time
 import requests
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, make_response
-from sqlalchemy import func, cast, Date
+from sqlalchemy import func
 from .models import UsageLog, CorsSettings, UserKey, ProviderKey
 from .utils import extract_tokens
 from . import db
@@ -75,16 +75,18 @@ def stats():
     tokens_sum = db.session.query(func.coalesce(func.sum(UsageLog.total_tokens), 0)).scalar() or 0
     today = datetime.utcnow().date()
     start_day = today - timedelta(days=6)
-    q = db.session.query(
-        cast(UsageLog.ts, Date).label('d'),
-        func.count(UsageLog.id).label('r'),
-        func.coalesce(func.sum(UsageLog.total_tokens), 0).label('t')
-    ).filter(UsageLog.ts >= datetime.combine(start_day, datetime.min.time())).group_by(cast(UsageLog.ts, Date)).order_by(cast(UsageLog.ts, Date).asc()).all()
-    got = {row.d: {'date': row.d.isoformat(), 'requests': row.r, 'tokens': row.t} for row in q}
+    rows = db.session.query(UsageLog.ts, UsageLog.total_tokens).filter(UsageLog.ts >= datetime.combine(start_day, datetime.min.time())).all()
+    agg = {}
+    for ts, tok in rows:
+        d = ts.date()
+        if d not in agg:
+            agg[d] = {'date': d.isoformat(), 'requests': 0, 'tokens': 0}
+        agg[d]['requests'] += 1
+        agg[d]['tokens'] += int(tok or 0)
     graph = []
     for i in range(7):
         d = start_day + timedelta(days=i)
-        graph.append(got.get(d, {'date': d.isoformat(), 'requests': 0, 'tokens': 0}))
+        graph.append(agg.get(d, {'date': d.isoformat(), 'requests': 0, 'tokens': 0}))
     response = make_response(jsonify({'keys': keys, 'requests': requests_count, 'tokens': tokens_sum, 'graph': graph}), 200)
     return apply_cors_headers(response)
 
