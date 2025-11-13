@@ -58,6 +58,12 @@ Overview
 </svg>
         API Keys
 </a>
+<a href="#playground" class="nav-item">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+</svg>
+Playground
+</a>
 <a href="#cors-settings" class="nav-item">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 <circle cx="12" cy="12" r="10"/>
@@ -564,6 +570,90 @@ Add Origin
 </div>
 </div>
 </section>
+
+<section id="playground" class="section">
+<div class="playground-layout">
+<aside class="playground-sidebar">
+<div class="playground-sidebar-header">
+<button id="newChatBtn" class="new-chat-btn">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<line x1="12" y1="5" x2="12" y2="19"/>
+<line x1="5" y1="12" x2="19" y2="12"/>
+</svg>
+New chat
+</button>
+</div>
+<div class="chat-history">
+<div class="chat-history-item active">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+</svg>
+<span>Current conversation</span>
+</div>
+</div>
+<div class="playground-settings">
+<div class="setting-item">
+<label>API Key</label>
+<select id="playgroundKeySelect" class="setting-select">
+<option value="">Select key</option>
+</select>
+</div>
+<div class="setting-item">
+<label>Model</label>
+<select id="playgroundModelSelect" class="setting-select">
+<option value="">Select model</option>
+</select>
+</div>
+</div>
+</aside>
+<main class="playground-main">
+<div class="chat-area">
+<div id="chatMessages" class="chat-messages">
+<div class="welcome-screen">
+<div class="welcome-icon">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M12 2L2 7l10 5 10-5-10-5z"/>
+<path d="M2 17l10 5 10-5"/>
+<path d="M2 12l10 5 10-5"/>
+</svg>
+</div>
+<h2>AI Playground</h2>
+<p>Start a conversation with your AI assistant</p>
+<div class="welcome-suggestions">
+<button class="suggestion-card">
+<span class="suggestion-icon">💡</span>
+<span>Explain quantum computing</span>
+</button>
+<button class="suggestion-card">
+<span class="suggestion-icon">✍️</span>
+<span>Write a creative story</span>
+</button>
+<button class="suggestion-card">
+<span class="suggestion-icon">🔍</span>
+<span>Help me debug code</span>
+</button>
+<button class="suggestion-card">
+<span class="suggestion-icon">🎨</span>
+<span>Brainstorm ideas</span>
+</button>
+</div>
+</div>
+</div>
+<div class="chat-input-area">
+<div class="input-wrapper">
+<textarea id="chatInput" placeholder="Message AI..." rows="1"></textarea>
+<button id="sendMessageBtn" class="send-btn" disabled>
+<svg viewBox="0 0 24 24" fill="currentColor">
+<path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+</svg>
+</button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</section>
+
 </main>
 </div><div id="toast" class="toast"></div>
 <div id="keyModal" class="modal">
@@ -592,6 +682,7 @@ Copy
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 <script src="/static/admin/app.js"></script>
 </body>
 </html>

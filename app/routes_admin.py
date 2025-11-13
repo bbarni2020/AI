@@ -229,3 +229,80 @@ def update_cors_settings():
     
     db.session.commit()
     return jsonify({'ok': True})
+
+@admin_bp.post('/playground/chat')
+def playground_chat():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    data = request.get_json(silent=True) or {}
+    user_key_id = data.get('key_id')
+    model = data.get('model')
+    messages = data.get('messages', [])
+    
+    if not user_key_id:
+        return jsonify({'error': 'key_id is required'}), 400
+    if not model:
+        return jsonify({'error': 'model is required'}), 400
+    if not messages:
+        return jsonify({'error': 'messages is required'}), 400
+    
+    user_key = UserKey.query.get(user_key_id)
+    if not user_key:
+        return jsonify({'error': 'Key not found'}), 404
+    
+    import requests
+    import json
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+    from .models import UsageLog, ProviderKey
+    from .utils import extract_tokens
+    
+    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
+    if upstream_key_env:
+        upstream_key = upstream_key_env
+        provider_id = 1
+    else:
+        provider = ProviderKey.query.filter_by(enabled=True).first()
+        if not provider:
+            return jsonify({'error': 'No upstream provider configured'}), 500
+        upstream_key = provider.api_key
+        provider_id = provider.id
+    
+    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
+    
+    try:
+        resp = requests.post(
+            upstream_url,
+            headers={
+                'Authorization': f'Bearer {upstream_key}',
+                'Content-Type': 'application/json'
+            },
+            data=json.dumps({
+                'model': model,
+                'messages': messages
+            }),
+            timeout=120
+        )
+        
+        if resp.status_code == 200:
+            response_data = resp.json()
+            pt, rt, tt = extract_tokens(response_data)
+            ul = UsageLog(
+                provider_key_id=provider_id,
+                user_key_id=user_key.id,
+                request_tokens=pt,
+                response_tokens=rt,
+                total_tokens=tt
+            )
+            db.session.add(ul)
+            user_key.last_used_at = datetime.utcnow()
+            db.session.commit()
+            
+            return jsonify(response_data)
+        else:
+            return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+

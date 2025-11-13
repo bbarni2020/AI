@@ -708,6 +708,267 @@ const CorsSettings = {
   }
 };
 
+const Playground = {
+  messages: [],
+  selectedKey: null,
+  selectedModel: null,
+  
+  async init() {
+    await this.loadKeys();
+    await this.loadModels();
+    this.setupTextareaAutoResize();
+  },
+  
+  async loadKeys() {
+    const res = await API.request('/admin/user-keys');
+    if (res.status !== 200) return;
+    
+    const select = document.getElementById('playgroundKeySelect');
+    select.innerHTML = '<option value="">Select key</option>';
+    
+    res.data.forEach(key => {
+      const option = document.createElement('option');
+      option.value = key.id;
+      option.textContent = key.name || key.key;
+      select.appendChild(option);
+    });
+  },
+  
+  async loadModels() {
+    const res = await API.request('/models');
+    if (res.status !== 200) return;
+    
+    const select = document.getElementById('playgroundModelSelect');
+    select.innerHTML = '<option value="">Select model</option>';
+    
+    if (res.data && res.data.models) {
+      res.data.models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model;
+        option.textContent = model;
+        select.appendChild(option);
+      });
+    }
+  },
+  
+  setupTextareaAutoResize() {
+    const textarea = document.getElementById('chatInput');
+    textarea.addEventListener('input', () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+      this.updateSendButton();
+    });
+  },
+  
+  updateSendButton() {
+    const input = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendMessageBtn');
+    const hasText = input.value.trim().length > 0;
+    sendBtn.disabled = !hasText;
+  },
+  
+  onKeyChange() {
+    this.selectedKey = document.getElementById('playgroundKeySelect').value;
+  },
+  
+  onModelChange() {
+    this.selectedModel = document.getElementById('playgroundModelSelect').value;
+  },
+  
+  async sendMessage() {
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    
+    if (!message) return;
+    if (!this.selectedKey) {
+      UI.showToast('Please select an API key', 'error');
+      return;
+    }
+    if (!this.selectedModel) {
+      UI.showToast('Please select a model', 'error');
+      return;
+    }
+    
+    input.value = '';
+    input.style.height = 'auto';
+    input.disabled = true;
+    document.getElementById('sendMessageBtn').disabled = true;
+    
+    this.hideWelcomeScreen();
+    
+    this.messages.push({ role: 'user', content: message });
+    this.renderMessages();
+    this.showTypingIndicator();
+    
+    try {
+      const result = await API.request('/admin/playground/chat', 'POST', {
+        key_id: this.selectedKey,
+        model: this.selectedModel,
+        messages: this.messages
+      });
+      
+      this.hideTypingIndicator();
+      
+      if (result.status !== 200) {
+        throw new Error(result.data.error || 'Request failed');
+      }
+      
+      const assistantMsg = result.data.choices[0].message;
+      this.messages.push(assistantMsg);
+      this.renderMessages();
+      
+    } catch (err) {
+      this.hideTypingIndicator();
+      UI.showToast(err.message, 'error');
+    } finally {
+      input.disabled = false;
+      input.focus();
+    }
+  },
+  
+  hideWelcomeScreen() {
+    const welcome = document.querySelector('.welcome-screen');
+    if (welcome) {
+      welcome.remove();
+    }
+  },
+  
+  showTypingIndicator() {
+    const container = document.getElementById('chatMessages');
+    const indicator = document.createElement('div');
+    indicator.className = 'typing-indicator';
+    indicator.innerHTML = `
+      <div class="message-header">
+        <div class="message-avatar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="message-sender">AI Assistant</span>
+      </div>
+      <div class="typing-dots">
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+      </div>
+    `;
+    container.appendChild(indicator);
+    container.scrollTop = container.scrollHeight;
+  },
+  
+  hideTypingIndicator() {
+    const indicator = document.querySelector('.typing-indicator');
+    if (indicator) {
+      indicator.remove();
+    }
+  },
+  
+  renderMessages() {
+    const container = document.getElementById('chatMessages');
+    
+    const existingMessages = container.querySelectorAll('.chat-message');
+    existingMessages.forEach(msg => msg.remove());
+    
+    this.messages.forEach(msg => {
+      const div = document.createElement('div');
+      div.className = 'chat-message';
+      
+      const isUser = msg.role === 'user';
+      const avatarContent = isUser 
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>';
+      
+      const messageContent = isUser 
+        ? this.escapeHtml(msg.content)
+        : this.renderMarkdown(msg.content);
+      
+      div.innerHTML = `
+        <div class="message-header">
+          <div class="message-avatar ${msg.role}">
+            ${avatarContent}
+          </div>
+          <span class="message-sender">${isUser ? 'You' : 'AI Assistant'}</span>
+        </div>
+        <div class="message-text">${messageContent}</div>
+      `;
+      
+      container.appendChild(div);
+    });
+    
+    container.scrollTop = container.scrollHeight;
+  },
+  
+  renderMarkdown(text) {
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({
+        breaks: true,
+        gfm: true,
+        headerIds: false,
+        mangle: false
+      });
+      return marked.parse(text);
+    }
+    return this.escapeHtml(text);
+  },
+  
+  newChat() {
+    this.messages = [];
+    const container = document.getElementById('chatMessages');
+    container.innerHTML = `
+      <div class="welcome-screen">
+        <div class="welcome-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h2>AI Playground</h2>
+        <p>Start a conversation with your AI assistant</p>
+        <div class="welcome-suggestions">
+          <button class="suggestion-card">
+            <span class="suggestion-icon">💡</span>
+            <span>Explain quantum computing</span>
+          </button>
+          <button class="suggestion-card">
+            <span class="suggestion-icon">✍️</span>
+            <span>Write a creative story</span>
+          </button>
+          <button class="suggestion-card">
+            <span class="suggestion-icon">🔍</span>
+            <span>Help me debug code</span>
+          </button>
+          <button class="suggestion-card">
+            <span class="suggestion-icon">🎨</span>
+            <span>Brainstorm ideas</span>
+          </button>
+        </div>
+      </div>
+    `;
+    this.attachSuggestionHandlers();
+    UI.showToast('New chat started', 'success');
+  },
+  
+  attachSuggestionHandlers() {
+    document.querySelectorAll('.suggestion-card').forEach(card => {
+      card.onclick = () => {
+        const text = card.querySelector('span:last-child').textContent;
+        document.getElementById('chatInput').value = text;
+        this.updateSendButton();
+        document.getElementById('chatInput').focus();
+      };
+    });
+  },
+  
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+};
+
 const Navigation = {
   init() {
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -732,6 +993,9 @@ const Navigation = {
       
       if (sectionId === 'cors-settings') {
         CorsSettings.loadSettings();
+      } else if (sectionId === 'playground') {
+        Playground.init();
+        setTimeout(() => Playground.attachSuggestionHandlers(), 100);
       }
     }
   }
@@ -823,6 +1087,18 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   
   document.getElementById('themeToggle').onclick = () => UI.toggleTheme();
+  
+  document.getElementById('playgroundKeySelect').onchange = () => Playground.onKeyChange();
+  document.getElementById('playgroundModelSelect').onchange = () => Playground.onModelChange();
+  document.getElementById('sendMessageBtn').onclick = () => Playground.sendMessage();
+  document.getElementById('newChatBtn').onclick = () => Playground.newChat();
+  document.getElementById('chatInput').onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      Playground.sendMessage();
+    }
+  };
+  document.getElementById('chatInput').oninput = () => Playground.updateSendButton();
   
   Navigation.init();
   Auth.checkAuth();
