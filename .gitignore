@@ -12,3 +12,4 @@ build/
 .env
 data.db
 instance/
+test_server.py
