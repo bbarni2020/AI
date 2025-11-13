@@ -807,8 +807,10 @@ document.addEventListener('DOMContentLoaded', () => {
   
   document.querySelectorAll('.modal-close').forEach(btn => {
     btn.onclick = () => {
-      document.getElementById('keyModal')?.style.display = 'none';
-      document.getElementById('keyStatsModal')?.style.display = 'none';
+      const keyModal = document.getElementById('keyModal');
+      const keyStatsModal = document.getElementById('keyStatsModal');
+      if (keyModal) keyModal.style.display = 'none';
+      if (keyStatsModal) keyStatsModal.style.display = 'none';
     };
   });
   document.getElementById('modalCloseBtn').onclick = () => UI.hideModal();
