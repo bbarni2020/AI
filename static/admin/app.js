@@ -148,15 +148,24 @@ const UserKeys = {
   },
   
   async loadStats() {
-    document.getElementById('statsKeys').textContent = this.currentKeys.length;
-    await this.loadUsageData();
+    try {
+      const result = await API.request('/api/stats');
+      if (result.status === 200 && result.data) {
+        document.getElementById('statsKeys').textContent = result.data.keys || 0;
+        document.getElementById('statsRequests').textContent = (result.data.requests || 0).toLocaleString();
+        document.getElementById('statsTokens').textContent = (result.data.tokens || 0).toLocaleString();
+        if (result.data.graph) this.renderChart(result.data.graph);
+      }
+    } catch (e) {
+      console.error('Failed to load /api/stats:', e);
+    }
   },
   
   async loadUsageData() {
     try {
-      const result = await API.request('/admin/usage');
-      if (result.status === 200 && result.data) {
-        this.renderChart(result.data);
+      const result = await API.request('/api/stats');
+      if (result.status === 200 && result.data && result.data.graph) {
+        this.renderChart(result.data.graph);
       }
     } catch (err) {
       console.error('Failed to load usage data:', err);
