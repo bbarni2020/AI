@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from datetime import datetime
 from flask import Blueprint, request, jsonify, make_response
@@ -8,6 +9,63 @@ from .utils import extract_tokens
 from . import db
 
 api_bp = Blueprint('api', __name__)
+_models_cache = {'items': [], 'fetched_at': 0}
+_models_hits = {}
+
+def _resolve_upstream_key():
+    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
+    if upstream_key_env:
+        return upstream_key_env, 1
+    provider = ProviderKey.query.filter_by(enabled=True).first()
+    if not provider:
+        return '', 0
+    return provider.api_key, provider.id
+
+def fetch_models(force=False):
+    now = time.time()
+    ttl = int(os.getenv('MODEL_CACHE_TTL', '300'))
+    if not force and _models_cache['items'] and now - _models_cache['fetched_at'] < ttl:
+        return _models_cache['items']
+    key, _pid = _resolve_upstream_key()
+    if not key:
+        return _models_cache['items']
+    url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/models'
+    try:
+        r = requests.get(url, headers={'Authorization': f'Bearer {key}'}, timeout=30)
+        data = r.json() if 'application/json' in r.headers.get('Content-Type','') else {}
+        out = []
+        if isinstance(data, dict):
+            src = data.get('data') or data.get('models') or []
+            if isinstance(src, list):
+                for m in src:
+                    if isinstance(m, dict):
+                        mid = m.get('id') or m.get('name') or None
+                        if mid:
+                            out.append(mid)
+                    elif isinstance(m, str):
+                        out.append(m)
+        _models_cache['items'] = out
+        _models_cache['fetched_at'] = now
+    except Exception:
+        pass
+    return _models_cache['items']
+
+@api_bp.route('/models', methods=['GET'])
+def list_models():
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr) or 'x'
+    now = time.time()
+    window = now - 60
+    hits = _models_hits.get(ip, [])
+    hits = [h for h in hits if h > window]
+    limit = int(os.getenv('MODELS_RATE_LIMIT_PER_MIN','30'))
+    if len(hits) >= limit:
+        return jsonify({'error': 'rate_limited'}), 429
+    hits.append(now)
+    _models_hits[ip] = hits
+    refresh = request.args.get('refresh') == '1'
+    items = fetch_models(force=refresh)
+    response = make_response(jsonify({'models': items, 'count': len(items)}), 200)
+    return apply_cors_headers(response)
 
 def apply_cors_headers(response):
     settings = CorsSettings.query.first()
@@ -52,16 +110,15 @@ def proxy_chat():
     
     body = request.get_json(force=True)
     
-    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
-    if upstream_key_env:
-        upstream_key = upstream_key_env
-        provider_id = 1
-    else:
-        provider = ProviderKey.query.filter_by(enabled=True).first()
-        if not provider:
-            return jsonify({'error': 'no_provider_configured', 'message': 'No upstream provider key configured'}), 500
-        upstream_key = provider.api_key
-        provider_id = provider.id
+    upstream_key, provider_id = _resolve_upstream_key()
+    if not upstream_key:
+        return jsonify({'error': 'no_provider_configured', 'message': 'No upstream provider key configured'}), 500
+    models = fetch_models()
+    if isinstance(body, dict):
+        chosen = body.get('model')
+        if not chosen or (models and chosen not in models):
+            if models:
+                body['model'] = models[0]
     
     upstream = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
     
