@@ -1247,6 +1247,8 @@ const AgentBuilder = {
     await this.populateModelSelect();
     this.setupEditorHandlers();
     this.setupChatHandlers();
+    this.setupTabHandlers();
+    this.setupSettingsHandlers();
   },
 
   async loadAgents() {
@@ -1431,15 +1433,199 @@ const AgentBuilder = {
       UI.showToast('Preview is inline (markdown rendered in chat)', 'success');
     };
     document.getElementById('openMdBtn').onclick = () => { if (!this.currentAgent) return; const url = `/admin/agents/raw/${encodeURIComponent(this.currentAgent)}`; window.open(url, '_blank'); };
+    document.querySelector('.ai-builder-trigger').onclick = () => this.openAIBuilder();
   },
 
-  setupChatHandlers() {
-    const input = document.getElementById('agentChatInput');
-    input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; document.getElementById('agentSendBtn').disabled = !(input.value.trim().length > 0); };
-    document.getElementById('agentSendBtn').onclick = () => this.sendAgentChat();
-    document.getElementById('agentChatInput').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendAgentChat(); } };
-    document.getElementById('playgroundKeySelect').onchange = () => { this.selectedKey = document.getElementById('playgroundKeySelect').value; };
-    document.getElementById('playgroundModelSelect').onchange = () => { this.selectedModel = document.getElementById('playgroundModelSelect').value; };
+  setupTabHandlers() {
+    document.querySelectorAll('.agent-tab').forEach(tab => {
+      tab.onclick = () => this.switchTab(tab.dataset.tab);
+    });
+  },
+
+  switchTab(tabName) {
+    document.querySelectorAll('.agent-tab').forEach(tab => {
+      tab.classList.remove('active');
+    });
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+    document.querySelectorAll('.agent-tab-content').forEach(content => {
+      content.classList.remove('active');
+    });
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+
+    if (tabName === 'settings') {
+      this.loadAgentSettings();
+    }
+  },
+
+  setupSettingsHandlers() {
+    document.getElementById('saveAgentSettingsBtn').onclick = () => this.saveAgentSettings();
+    document.getElementById('resetAgentSettingsBtn').onclick = () => this.resetAgentSettings();
+    document.getElementById('deleteAgentSettingsBtn').onclick = () => this.deleteAgent();
+  },
+
+  loadAgentSettings() {
+    if (!this.currentAgent) return;
+
+    document.getElementById('agentNameSetting').value = this.currentAgent;
+    document.getElementById('agentModelSetting').value = this.selectedModel || '';
+    document.getElementById('agentKeySetting').value = this.selectedKey || '';
+    document.getElementById('agentSystemPrompt').value = this.mdContent;
+
+    document.getElementById('agentTemperature').value = '0.7';
+    document.getElementById('agentMaxTokens').value = '2048';
+
+    this.populateSettingsKeySelect();
+    this.populateSettingsModelSelect();
+  },
+
+  async populateSettingsKeySelect() {
+    const res = await API.request('/admin/user-keys');
+    const select = document.getElementById('agentKeySetting');
+    if (!select) return;
+    select.innerHTML = '<option value="">Select API Key</option>';
+    if (res.status !== 200) return;
+    (res.data || []).forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k.id;
+      opt.textContent = k.name || k.key;
+      select.appendChild(opt);
+    });
+  },
+
+  async populateSettingsModelSelect() {
+    const res = await API.request('/models');
+    const select = document.getElementById('agentModelSetting');
+    if (!select) return;
+    select.innerHTML = '<option value="">Select model</option>';
+    if (res.status !== 200 || !res.data || !res.data.models) return;
+    (res.data.models || []).forEach(m => {
+      const lower = (m || '').toLowerCase();
+      const isEmbeddings = false;
+      if (isEmbeddings && !lower.includes('embed')) return;
+      if (!isEmbeddings && lower.includes('embed')) return;
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      select.appendChild(opt);
+    });
+  },
+
+  async saveAgentSettings() {
+    if (!this.currentAgent) {
+      UI.showToast('No agent selected', 'error');
+      return;
+    }
+
+    const name = document.getElementById('agentNameSetting').value.trim();
+    const model = document.getElementById('agentModelSetting').value;
+    const key = document.getElementById('agentKeySetting').value;
+    const temperature = parseFloat(document.getElementById('agentTemperature').value) || 0.7;
+    const maxTokens = parseInt(document.getElementById('agentMaxTokens').value) || 2048;
+    const systemPrompt = document.getElementById('agentSystemPrompt').value;
+
+    this.selectedModel = model;
+    this.selectedKey = key;
+
+    const r = await API.request(`/admin/agents/${encodeURIComponent(this.currentAgent)}`, 'PUT', { content: systemPrompt });
+    if (r.status === 200) {
+      this.mdContent = systemPrompt;
+      document.getElementById('agentMdEditor').value = systemPrompt;
+      UI.showToast('Agent settings saved', 'success');
+    } else {
+      UI.showToast('Failed to save settings', 'error');
+    }
+  },
+
+  resetAgentSettings() {
+    if (!this.currentAgent) return;
+    this.loadAgentSettings();
+    UI.showToast('Settings reset to current values', 'success');
+  },
+
+  openAIBuilder() {
+    const modal = document.getElementById('ai-builder-modal');
+    if (modal) {
+      modal.style.display = 'flex';
+      const currentContent = document.getElementById('agentMdEditor').value;
+      document.getElementById('ai-builder-prompt').value = currentContent;
+    }
+  },
+
+  closeAIBuilder() {
+    const modal = document.getElementById('ai-builder-modal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  },
+
+  async generateAIBuilder() {
+    const prompt = document.getElementById('ai-builder-prompt').value.trim();
+    if (!prompt) {
+      UI.showToast('Please enter a prompt for the AI builder', 'error');
+      return;
+    }
+
+    const generateBtn = document.getElementById('ai-builder-generate-btn');
+    const originalText = generateBtn.innerHTML;
+    generateBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Generating...';
+    generateBtn.disabled = true;
+
+    try {
+      const r = await API.request('/admin/agents/generate', 'POST', { 
+        agent: 'ai-builder-temp',
+        messages: [{ role: 'user', content: prompt }],
+        model: 'gpt-4'
+      });
+
+      if (r.status === 200) {
+        let content = r.data.content || 'No content generated';
+        content = content.replace(/^```markdown\s*\n?/gm, '').replace(/^```\s*\n?/gm, '').trim();
+        document.getElementById('ai-builder-output').value = content;
+        UI.showToast('AI Builder generated successfully', 'success');
+      } else {
+        UI.showToast('Failed to generate AI builder content', 'error');
+      }
+    } catch (e) {
+      UI.showToast('Network error during generation', 'error');
+    } finally {
+      generateBtn.innerHTML = originalText;
+      generateBtn.disabled = false;
+    }
+  },
+
+  copyAIBuilderOutput() {
+    const output = document.getElementById('ai-builder-output').value;
+    if (!output.trim()) {
+      UI.showToast('No content to copy', 'error');
+      return;
+    }
+
+    navigator.clipboard.writeText(output).then(() => {
+      UI.showToast('Content copied to clipboard', 'success');
+    }).catch(() => {
+      UI.showToast('Failed to copy content', 'error');
+    });
+  },
+
+  applyAIBuilderOutput() {
+    const output = document.getElementById('ai-builder-output').value.trim();
+    if (!output) {
+      UI.showToast('No content to apply', 'error');
+      return;
+    }
+
+    document.getElementById('agentMdEditor').value = output;
+    this.mdContent = output;
+    
+    this.closeAIBuilder();
+    
+    UI.showToast('Content applied to agent editor', 'success');
+  },
+
+  useExample(exampleText) {
+    document.getElementById('ai-builder-prompt').value = exampleText;
+    UI.showToast('Example loaded into prompt', 'success');
   },
 
   renderMarkdown(text) { if (typeof marked !== 'undefined') return marked.parse(text); return this.escapeHtml(text); },
@@ -1583,6 +1769,22 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chatInput').oninput = () => Playground.updateSendButton();
   const settingsToggle = document.getElementById('settingsToggle');
   if (settingsToggle) settingsToggle.onclick = () => Playground.toggleMobileSettings();
+  
+  const aiBuilderClose = document.querySelector('.ai-builder-modal-close');
+  if (aiBuilderClose) aiBuilderClose.onclick = () => AgentBuilder.closeAIBuilder();
+  
+  const aiBuilderGenerate = document.getElementById('ai-builder-generate-btn');
+  if (aiBuilderGenerate) aiBuilderGenerate.onclick = () => AgentBuilder.generateAIBuilder();
+  
+  const aiBuilderCopy = document.getElementById('ai-builder-copy-btn');
+  if (aiBuilderCopy) aiBuilderCopy.onclick = () => AgentBuilder.copyAIBuilderOutput();
+  
+  const aiBuilderApply = document.getElementById('ai-builder-apply-btn');
+  if (aiBuilderApply) aiBuilderApply.onclick = () => AgentBuilder.applyAIBuilderOutput();
+  
+  document.querySelectorAll('.ai-builder-use-example').forEach(btn => {
+    btn.onclick = (e) => AgentBuilder.useExample(e.target.closest('.ai-builder-example-card').querySelector('p').textContent);
+  });
   
   Navigation.init();
   Auth.checkAuth();
