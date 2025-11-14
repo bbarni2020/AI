@@ -599,10 +599,30 @@ New chat
 </select>
 </div>
 <div class="setting-item">
+<label>Mode</label>
+<select id="playgroundModeSelect" class="setting-select">
+  <option value="chat">Chat</option>
+  <option value="embeddings">Embeddings</option>
+</select>
+</div>
+<div class="setting-item">
 <label>Model</label>
 <select id="playgroundModelSelect" class="setting-select">
 <option value="">Select model</option>
 </select>
+</div>
+<div class="setting-item compare-block">
+  <label>Compare Models</label>
+  <div class="compare-controls">
+    <label class="checkbox-label">
+      <input id="compareToggle" type="checkbox">
+      <span class="checkbox-custom"></span>
+      <span>Enable</span>
+    </label>
+    <select id="playgroundModelSelectB" class="setting-select" style="margin-top:8px; display:none">
+      <option value="">Select model B</option>
+    </select>
+  </div>
 </div>
 </div>
 </aside>

@@ -712,11 +712,17 @@ const Playground = {
   messages: [],
   selectedKey: null,
   selectedModel: null,
+  selectedMode: 'chat',
+  compareEnabled: false,
+  selectedModelB: null,
+  messagesA: [],
+  messagesB: [],
   
   async init() {
     await this.loadKeys();
     await this.loadModels();
     this.setupTextareaAutoResize();
+    this.adaptSettingsForMobile();
   },
   
   async loadKeys() {
@@ -733,20 +739,55 @@ const Playground = {
       select.appendChild(option);
     });
   },
+
+  adaptSettingsForMobile() {
+    try {
+      const sidebar = document.querySelector('.playground-sidebar');
+      const main = document.querySelector('.playground-main');
+      const settings = sidebar.querySelector('.playground-settings');
+      if (!sidebar || !main || !settings) return;
+
+      const isMobile = window.matchMedia('(max-width: 900px)').matches;
+      const alreadyMoved = !!main.querySelector('.playground-settings');
+
+      if (isMobile && !alreadyMoved) {
+        settings.classList.add('mobile-settings');
+        main.insertBefore(settings, main.firstChild);
+      } else if (!isMobile && alreadyMoved) {
+        settings.classList.remove('mobile-settings');
+        sidebar.appendChild(settings);
+      }
+    } catch (e) {
+      // noop
+    }
+  },
   
   async loadModels() {
     const res = await API.request('/models');
     if (res.status !== 200) return;
     
-    const select = document.getElementById('playgroundModelSelect');
-    select.innerHTML = '<option value="">Select model</option>';
-    
+    const selectA = document.getElementById('playgroundModelSelect');
+    const selectB = document.getElementById('playgroundModelSelectB');
+    selectA.innerHTML = '<option value="">Select model</option>';
+    selectB.innerHTML = '<option value="">Select model B</option>';
     if (res.data && res.data.models) {
-      res.data.models.forEach(model => {
-        const option = document.createElement('option');
-        option.value = model;
-        option.textContent = model;
-        select.appendChild(option);
+      const models = res.data.models;
+      const isEmbeddings = this.selectedMode === 'embeddings';
+      models.forEach(model => {
+        const lower = (model || '').toLowerCase();
+        if (isEmbeddings) {
+          if (!lower.includes('embed')) return;
+        } else {
+          if (lower.includes('embed')) return;
+        }
+        const optionA = document.createElement('option');
+        optionA.value = model;
+        optionA.textContent = model;
+        selectA.appendChild(optionA);
+        const optionB = document.createElement('option');
+        optionB.value = model;
+        optionB.textContent = model;
+        selectB.appendChild(optionB);
       });
     }
   },
@@ -773,6 +814,28 @@ const Playground = {
   
   onModelChange() {
     this.selectedModel = document.getElementById('playgroundModelSelect').value;
+  },
+
+  onModelBChange() {
+    this.selectedModelB = document.getElementById('playgroundModelSelectB').value;
+  },
+
+  onModeChange() {
+    this.selectedMode = document.getElementById('playgroundModeSelect').value;
+    this.loadModels();
+    const input = document.getElementById('chatInput');
+    if (this.selectedMode === 'embeddings') {
+      input.placeholder = 'Enter text to embed...';
+    } else {
+      input.placeholder = 'Message AI...';
+    }
+    this.updateSendButton();
+  },
+
+  onCompareChange() {
+    this.compareEnabled = document.getElementById('compareToggle').checked;
+    const selB = document.getElementById('playgroundModelSelectB');
+    selB.style.display = this.compareEnabled ? 'block' : 'none';
   },
   
   async sendMessage() {
@@ -801,21 +864,71 @@ const Playground = {
     this.showTypingIndicator();
     
     try {
-      const result = await API.request('/admin/playground/chat', 'POST', {
-        key_id: this.selectedKey,
-        model: this.selectedModel,
-        messages: this.messages
-      });
-      
-      this.hideTypingIndicator();
-      
-      if (result.status !== 200) {
-        throw new Error(result.data.error || 'Request failed');
+      if (this.compareEnabled && this.selectedModel && this.selectedModelB) {
+        if (this.selectedMode === 'embeddings') {
+          const [rA, rB] = await Promise.all([
+            API.request('/admin/playground/embeddings', 'POST', { key_id: this.selectedKey, model: this.selectedModel, input: message }),
+            API.request('/admin/playground/embeddings', 'POST', { key_id: this.selectedKey, model: this.selectedModelB, input: message })
+          ]);
+          this.hideTypingIndicator();
+          if (rA.status !== 200 || rB.status !== 200) {
+            const err = (rA.status !== 200 && rA.data && rA.data.error) || (rB.status !== 200 && rB.data && rB.data.error) || 'Request failed';
+            throw new Error(err);
+          }
+          const embedA = (rA.data && rA.data.data && rA.data.data[0] && (rA.data.data[0].embedding || rA.data.data[0].vector)) || [];
+          const embedB = (rB.data && rB.data.data && rB.data.data[0] && (rB.data.data[0].embedding || rB.data.data[0].vector)) || [];
+          this.messagesA.push({ role: 'user', content: message });
+          this.messagesB.push({ role: 'user', content: message });
+          this.messagesA.push({ role: 'assistant', content: `Embedding (len=${embedA.length})\nPreview: ${JSON.stringify(embedA.slice(0,10))}` });
+          this.messagesB.push({ role: 'assistant', content: `Embedding (len=${embedB.length})\nPreview: ${JSON.stringify(embedB.slice(0,10))}` });
+          this.renderComparison();
+        } else {
+          const msgs = this.messages.slice();
+          const [rA, rB] = await Promise.all([
+            API.request('/admin/playground/chat', 'POST', { key_id: this.selectedKey, model: this.selectedModel, messages: msgs }),
+            API.request('/admin/playground/chat', 'POST', { key_id: this.selectedKey, model: this.selectedModelB, messages: msgs })
+          ]);
+          this.hideTypingIndicator();
+          if (rA.status !== 200 || rB.status !== 200) {
+            const err = (rA.status !== 200 && rA.data && rA.data.error) || (rB.status !== 200 && rB.data && rB.data.error) || 'Request failed';
+            throw new Error(err);
+          }
+          const assistantA = (rA.data && rA.data.choices && rA.data.choices[0] && rA.data.choices[0].message) || { role: 'assistant', content: 'No response' };
+          const assistantB = (rB.data && rB.data.choices && rB.data.choices[0] && rB.data.choices[0].message) || { role: 'assistant', content: 'No response' };
+          this.messagesA.push({ role: 'user', content: message });
+          this.messagesB.push({ role: 'user', content: message });
+          this.messagesA.push(assistantA);
+          this.messagesB.push(assistantB);
+          this.renderComparison();
+        }
+      } else {
+        if (this.selectedMode === 'embeddings') {
+          const result = await API.request('/admin/playground/embeddings', 'POST', { key_id: this.selectedKey, model: this.selectedModel, input: message });
+          this.hideTypingIndicator();
+          if (result.status !== 200) {
+            throw new Error(result.data.error || 'Request failed');
+          }
+          const data = result.data;
+          let embedding = null;
+          if (data && data.data && Array.isArray(data.data) && data.data[0]) {
+            embedding = data.data[0].embedding || data.data[0].vector || null;
+          }
+          const len = embedding ? embedding.length : 0;
+          const preview = embedding ? JSON.stringify(embedding.slice(0, 10)) : '[]';
+          const content = `Embedding (len=${len})\nPreview: ${preview}`;
+          this.messages.push({ role: 'assistant', content });
+          this.renderMessages();
+        } else {
+          const result = await API.request('/admin/playground/chat', 'POST', { key_id: this.selectedKey, model: this.selectedModel, messages: this.messages });
+          this.hideTypingIndicator();
+          if (result.status !== 200) {
+            throw new Error(result.data.error || 'Request failed');
+          }
+          const assistantMsg = result.data.choices[0].message;
+          this.messages.push(assistantMsg);
+          this.renderMessages();
+        }
       }
-      
-      const assistantMsg = result.data.choices[0].message;
-      this.messages.push(assistantMsg);
-      this.renderMessages();
       
     } catch (err) {
       this.hideTypingIndicator();
@@ -824,6 +937,47 @@ const Playground = {
       input.disabled = false;
       input.focus();
     }
+  },
+
+  renderComparison() {
+    const container = document.getElementById('chatMessages');
+    container.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'comparison-wrapper';
+    const colA = document.createElement('div');
+    colA.className = 'comparison-col';
+    const colB = document.createElement('div');
+    colB.className = 'comparison-col';
+    const headerA = document.createElement('div');
+    headerA.className = 'comparison-header';
+    headerA.textContent = `Model A: ${this.selectedModel || ''}`;
+    const headerB = document.createElement('div');
+    headerB.className = 'comparison-header';
+    headerB.textContent = `Model B: ${this.selectedModelB || ''}`;
+    colA.appendChild(headerA);
+    colB.appendChild(headerB);
+    const renderList = (list, root) => {
+      list.forEach(msg => {
+        const div = document.createElement('div');
+        div.className = 'chat-message';
+        const isUser = msg.role === 'user';
+        const messageContent = isUser ? this.escapeHtml(msg.content) : this.renderMarkdown(msg.content);
+        div.innerHTML = `
+          <div class="message-header">
+            <div class="message-avatar ${msg.role}"></div>
+            <span class="message-sender">${isUser ? 'You' : 'AI Assistant'}</span>
+          </div>
+          <div class="message-text">${messageContent}</div>
+        `;
+        root.appendChild(div);
+      });
+    };
+    renderList(this.messagesA, colA);
+    renderList(this.messagesB, colB);
+    wrapper.appendChild(colA);
+    wrapper.appendChild(colB);
+    container.appendChild(wrapper);
+    container.scrollTop = container.scrollHeight;
   },
   
   hideWelcomeScreen() {
@@ -1090,6 +1244,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
   document.getElementById('playgroundKeySelect').onchange = () => Playground.onKeyChange();
   document.getElementById('playgroundModelSelect').onchange = () => Playground.onModelChange();
+  document.getElementById('playgroundModelSelectB').onchange = () => Playground.onModelBChange();
+  document.getElementById('playgroundModeSelect').onchange = () => Playground.onModeChange();
+  document.getElementById('compareToggle').onchange = () => Playground.onCompareChange();
   document.getElementById('sendMessageBtn').onclick = () => Playground.sendMessage();
   document.getElementById('newChatBtn').onclick = () => Playground.newChat();
   document.getElementById('chatInput').onkeydown = (e) => {
@@ -1102,4 +1259,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   Navigation.init();
   Auth.checkAuth();
+  window.addEventListener('resize', () => {
+    Playground.adaptSettingsForMobile();
+  });
 });
