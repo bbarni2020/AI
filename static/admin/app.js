@@ -752,13 +752,40 @@ const Playground = {
 
       if (isMobile && !alreadyMoved) {
         settings.classList.add('mobile-settings');
+        settings.id = 'playgroundSettings';
+        settings.classList.add('collapsed');
         main.insertBefore(settings, main.firstChild);
       } else if (!isMobile && alreadyMoved) {
         settings.classList.remove('mobile-settings');
+        settings.classList.remove('collapsed');
+        settings.classList.remove('expanded');
+        settings.id = '';
         sidebar.appendChild(settings);
       }
     } catch (e) {
-      // noop
+    }
+  },
+
+  toggleMobileSettings() {
+    try {
+      const settings = document.querySelector('.mobile-settings');
+      const toggleBtn = document.getElementById('settingsToggle');
+      if (!settings || !toggleBtn) return;
+
+      const isExpanded = settings.classList.toggle('expanded');
+      if (isExpanded) {
+        settings.classList.remove('collapsed');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        toggleBtn.textContent = 'Hide settings';
+      } else {
+        settings.classList.remove('expanded');
+        settings.classList.add('collapsed');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.textContent = 'Settings';
+        const input = document.getElementById('chatInput');
+        if (input) input.focus();
+      }
+    } catch (e) {
     }
   },
   
@@ -1256,6 +1283,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   document.getElementById('chatInput').oninput = () => Playground.updateSendButton();
+  const settingsToggle = document.getElementById('settingsToggle');
+  if (settingsToggle) settingsToggle.onclick = () => Playground.toggleMobileSettings();
   
   Navigation.init();
   Auth.checkAuth();

@@ -1790,7 +1790,6 @@ td .status-badge {
     .comparison-col { width: 100%; max-height: none; }
 }
 
-/* Mobile / small screen behavior for the Playground */
 @media (max-width: 900px) {
     .playground-layout {
         flex-direction: column;
@@ -1871,7 +1870,6 @@ td .status-badge {
         padding: 10px 12px;
     }
   
-    /* When settings are moved into main for mobile */
     .mobile-settings {
         position: sticky;
         top: 0;
@@ -1883,6 +1881,50 @@ td .status-badge {
         gap: 8px;
         align-items: center;
         flex-wrap: wrap;
+    }
+
+    .mobile-settings.collapsed {
+        max-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        overflow: hidden;
+        opacity: 0;
+        pointer-events: none;
+        transition: max-height 220ms ease, opacity 180ms ease, padding 180ms ease;
+    }
+
+    .mobile-settings.expanded {
+        max-height: 420px;
+        padding: 10px 12px;
+        overflow: auto;
+        opacity: 1;
+        pointer-events: auto;
+        transition: max-height 260ms ease, opacity 160ms ease, padding 160ms ease;
+    }
+
+    .mobile-controls {
+        display: flex;
+        justify-content: flex-end;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-card);
+        z-index: 65;
+    }
+
+    .settings-toggle {
+        padding: 8px 12px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        color: var(--text-primary);
+        transition: var(--transition);
+    }
+
+    .settings-toggle[aria-expanded="true"] {
+        background: var(--bg-hover);
     }
 }
 
