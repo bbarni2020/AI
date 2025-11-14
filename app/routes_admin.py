@@ -378,3 +378,257 @@ def playground_embeddings():
     except Exception as e:
         return jsonify({'error': str(e)}), 502
 
+
+@admin_bp.post('/playground/fetch_md')
+def playground_fetch_md():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    url = data.get('url')
+    if not url:
+        return jsonify({'error': 'url is required'}), 400
+
+    import requests
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return jsonify({'error': f'Failed to fetch: {r.status_code}'}), 400
+        content_type = r.headers.get('Content-Type', '')
+        text = r.text
+        return jsonify({'content': text})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+
+
+@admin_bp.get('/agents')
+def list_agents():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    agents_dir = os.path.join(current_app.instance_path, 'agents')
+    if not os.path.exists(agents_dir):
+        os.makedirs(agents_dir, exist_ok=True)
+    files = [f for f in os.listdir(agents_dir) if f.endswith('.md')]
+    names = [os.path.splitext(f)[0] for f in files]
+    return jsonify({'agents': names})
+
+
+@admin_bp.get('/agents/<agent>')
+def get_agent(agent):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    safe = ''.join([c for c in agent if c.isalnum() or c in ('-', '_')])
+    agents_dir = os.path.join(current_app.instance_path, 'agents')
+    path = os.path.join(agents_dir, f"{safe}.md")
+    if not os.path.exists(path):
+        return jsonify({'error': 'Agent not found'}), 404
+    with open(path, 'r', encoding='utf-8') as fh:
+        content = fh.read()
+    return jsonify({'content': content})
+
+
+@admin_bp.get('/agents/raw/<agent>')
+def get_agent_raw(agent):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    safe = ''.join([c for c in agent if c.isalnum() or c in ('-', '_')])
+    agents_dir = os.path.join(current_app.instance_path, 'agents')
+    path = os.path.join(agents_dir, f"{safe}.md")
+    if not os.path.exists(path):
+        return jsonify({'error': 'Agent not found'}), 404
+    with open(path, 'r', encoding='utf-8') as fh:
+        content = fh.read()
+    return current_app.response_class(content, mimetype='text/markdown')
+
+
+@admin_bp.put('/agents/<agent>')
+def save_agent(agent):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    content = data.get('content', '')
+    safe = ''.join([c for c in agent if c.isalnum() or c in ('-', '_')])
+    agents_dir = os.path.join(current_app.instance_path, 'agents')
+    os.makedirs(agents_dir, exist_ok=True)
+    path = os.path.join(agents_dir, f"{safe}.md")
+    with open(path, 'w', encoding='utf-8') as fh:
+        fh.write(content)
+    return jsonify({'ok': True})
+
+
+@admin_bp.post('/agents')
+def create_agent():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    name = data.get('name', '')
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    safe = ''.join([c for c in name if c.isalnum() or c in ('-', '_')])
+    agents_dir = os.path.join(current_app.instance_path, 'agents')
+    os.makedirs(agents_dir, exist_ok=True)
+    path = os.path.join(agents_dir, f"{safe}.md")
+    if not os.path.exists(path):
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write('')
+    return jsonify({'ok': True, 'name': safe})
+
+
+@admin_bp.delete('/agents/<agent>')
+def delete_agent(agent):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    safe = ''.join([c for c in agent if c.isalnum() or c in ('-', '_')])
+    agents_dir = os.path.join(current_app.instance_path, 'agents')
+    path = os.path.join(agents_dir, f"{safe}.md")
+    if os.path.exists(path):
+        os.remove(path)
+        return jsonify({'ok': True})
+    return jsonify({'error': 'not found'}), 404
+
+
+@admin_bp.post('/agents/generate')
+def generate_agent_md():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    agent = data.get('agent')
+    messages = data.get('messages') or []
+    model = data.get('model') or data.get('model_name') or ''
+    if not agent:
+        return jsonify({'error': 'agent is required'}), 400
+    if not messages:
+        return jsonify({'error': 'messages required'}), 400
+
+    import requests
+    import json
+    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
+    if upstream_key_env:
+        upstream_key = upstream_key_env
+        provider_id = 1
+    else:
+        provider = ProviderKey.query.filter_by(enabled=True).first()
+        if not provider:
+            return jsonify({'error': 'No upstream provider configured'}), 500
+        upstream_key = provider.api_key
+        provider_id = provider.id
+
+    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
+
+    system_prompt = (
+        "You are an assistant that writes agent model.md files for an AI platform. "
+        "Given a user's requirements in the conversation, produce a concise, structured markdown file that includes instructions and system role content. "
+        "Return the content only in markdown format, suitable to be used as a system prompt for an agent."
+    )
+
+    body = {
+        'model': model or 'gpt-4',
+        'messages': [{'role': 'system', 'content': system_prompt}] + messages
+    }
+
+    try:
+        resp = requests.post(
+            upstream_url,
+            headers={'Authorization': f'Bearer {upstream_key}', 'Content-Type': 'application/json'},
+            data=json.dumps(body),
+            timeout=120
+        )
+
+        if resp.status_code != 200:
+            return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
+
+        response_data = resp.json()
+        content = ''
+        try:
+            content = response_data.get('choices', [])[0].get('message', {}).get('content', '')
+        except Exception:
+            content = ''
+
+        safe = ''.join([c for c in agent if c.isalnum() or c in ('-', '_')])
+        agents_dir = os.path.join(current_app.instance_path, 'agents')
+        os.makedirs(agents_dir, exist_ok=True)
+        path = os.path.join(agents_dir, f"{safe}.md")
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(content)
+
+        return jsonify({'content': content})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+
+
+@admin_bp.post('/agents/<agent>/chat')
+def agent_chat(agent):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    user_key_id = data.get('key_id')
+    model = data.get('model')
+    messages = data.get('messages', [])
+    if not user_key_id:
+        return jsonify({'error': 'key_id is required'}), 400
+    if not model:
+        return jsonify({'error': 'model is required'}), 400
+    if not messages:
+        return jsonify({'error': 'messages is required'}), 400
+
+    safe = ''.join([c for c in agent if c.isalnum() or c in ('-', '_')])
+    agents_dir = os.path.join(current_app.instance_path, 'agents')
+    path = os.path.join(agents_dir, f"{safe}.md")
+    system_content = ''
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as fh:
+            system_content = fh.read()
+
+    msgs = messages[:]
+    if system_content:
+        msgs.insert(0, {'role': 'system', 'content': system_content})
+
+    user_key = UserKey.query.get(user_key_id)
+    if not user_key:
+        return jsonify({'error': 'Key not found'}), 404
+
+    import requests
+    import json
+    from .models import UsageLog, ProviderKey
+    from .utils import extract_tokens
+
+    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
+    if upstream_key_env:
+        upstream_key = upstream_key_env
+        provider_id = 1
+    else:
+        provider = ProviderKey.query.filter_by(enabled=True).first()
+        if not provider:
+            return jsonify({'error': 'No upstream provider configured'}), 500
+        upstream_key = provider.api_key
+        provider_id = provider.id
+
+    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
+
+    try:
+        resp = requests.post(
+            upstream_url,
+            headers={'Authorization': f'Bearer {upstream_key}', 'Content-Type': 'application/json'},
+            data=json.dumps({'model': model, 'messages': msgs}),
+            timeout=120
+        )
+
+        if resp.status_code == 200:
+            response_data = resp.json()
+            pt, rt, tt = extract_tokens(response_data)
+            ul = UsageLog(
+                provider_key_id=provider_id,
+                user_key_id=user_key.id,
+                request_tokens=pt,
+                response_tokens=rt,
+                total_tokens=tt
+            )
+            db.session.add(ul)
+            user_key.last_used_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify(response_data)
+        else:
+            return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+

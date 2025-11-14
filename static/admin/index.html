@@ -64,6 +64,13 @@ Overview
 </svg>
 Playground
 </a>
+  <a href="#agent-builder" class="nav-item">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M3 11l9-6 9 6v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6z" />
+<path d="M9 22V12h6v10" />
+</svg>
+Agent Builder
+</a>
 <a href="#cors-settings" class="nav-item">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 <circle cx="12" cy="12" r="10"/>
@@ -611,6 +618,22 @@ New chat
 <option value="">Select model</option>
 </select>
 </div>
+<div class="setting-item">
+  <label>System model (.md)</label>
+  <div class="file-input-wrapper">
+    <label for="playgroundMdUpload" class="file-btn">Choose .md</label>
+    <input id="playgroundMdUpload" type="file" accept=".md" />
+    <span id="playgroundMdFileName" class="file-name"></span>
+  </div>
+  <div style="display:flex; gap:8px; margin-top:8px;">
+    <input id="playgroundMdUrl" class="setting-input" placeholder="Paste URL to a .md file (optional)" style="flex:1;" />
+    <button id="playgroundMdFetchBtn" class="btn-primary">Load</button>
+  </div>
+  <div id="playgroundMdPreview" class="md-preview" style="margin-top:8px; display:none"></div>
+  <div style="margin-top:8px;">
+    <button id="playgroundMdClearBtn" class="btn-secondary">Remove system prompt</button>
+  </div>
+</div>
 <div class="setting-item compare-block">
   <label>Compare Models</label>
   <div class="compare-controls">
@@ -676,6 +699,64 @@ New chat
 </main>
 </div>
 </section>
+
+<section id="agent-builder" class="section">
+<div class="page-header">
+<h2>Agent Builder</h2>
+<p class="subtitle">Design, iterate and test agents using Markdown system prompts</p>
+</div>
+
+<div class="card form-card">
+<div class="card-header">
+<h3>Agents</h3>
+</div>
+<div class="card-content">
+<div class="agent-layout">
+<aside class="agent-sidebar">
+<div class="agent-controls">
+<input id="agentNameInput" class="setting-input" placeholder="Agent name" />
+<button id="createAgentBtn" class="btn-primary">Create / Load</button>
+<button id="deleteAgentBtn" class="btn-secondary" style="display:none">Delete</button>
+<select id="agentKeySelect" class="setting-select" style="width:160px">
+  <option value="">Select API Key</option>
+</select>
+<select id="agentModelSelect" class="setting-select" style="width:220px">
+  <option value="">Select model</option>
+</select>
+</div>
+<div class="agent-list" id="agentList"></div>
+</aside>
+<main class="agent-main">
+<div class="agent-editor">
+<div class="editor-actions">
+<button id="saveAgentBtn" class="btn-primary">Save</button>
+<button id="generateAgentBtn" class="btn-secondary">Generate from chat</button>
+<button id="previewAgentBtn" class="btn-secondary">Preview</button>
+<button id="openMdBtn" class="btn-secondary">Open .md</button>
+<span id="agentStatus" class="text-muted"></span>
+ </div>
+<textarea id="agentMdEditor" class="agent-md-editor" placeholder="Agent model.md content..."></textarea>
+ </div>
+<div class="agent-playground">
+<div class="agent-chat-area">
+<div id="agentChatMessages" class="chat-messages"></div>
+<div class="chat-input-area">
+<div class="input-wrapper">
+<textarea id="agentChatInput" placeholder="Talk with the agent..." rows="1"></textarea>
+<button id="agentSendBtn" class="send-btn" disabled>
+<svg viewBox="0 0 24 24" fill="currentColor">
+<path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+</svg>
+</button>
+ </div>
+ </div>
+ </div>
+ </div>
+ </main>
+ </div>
+ </div>
+ </div>
+ </section>
 
 </main>
 </div><div id="toast" class="toast"></div>

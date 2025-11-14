@@ -713,6 +713,7 @@ const Playground = {
   selectedKey: null,
   selectedModel: null,
   selectedMode: 'chat',
+  systemMdContent: null,
   compareEnabled: false,
   selectedModelB: null,
   messagesA: [],
@@ -722,6 +723,7 @@ const Playground = {
     await this.loadKeys();
     await this.loadModels();
     this.setupTextareaAutoResize();
+    this.setupMdHandlers();
     this.adaptSettingsForMobile();
   },
   
@@ -859,6 +861,79 @@ const Playground = {
     this.updateSendButton();
   },
 
+  setupMdHandlers() {
+    const upload = document.getElementById('playgroundMdUpload');
+    const urlInput = document.getElementById('playgroundMdUrl');
+    const fetchBtn = document.getElementById('playgroundMdFetchBtn');
+    const clearBtn = document.getElementById('playgroundMdClearBtn');
+    const preview = document.getElementById('playgroundMdPreview');
+
+    if (upload) {
+      upload.onchange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.md')) {
+          UI.showToast('Only .md files are supported', 'error');
+          return;
+        }
+        try {
+          const text = await file.text();
+          this.systemMdContent = text;
+          preview.style.display = 'block';
+          try {
+            preview.innerHTML = `<div class="preview-header">System prompt preview <span style=\"font-weight:400;color:var(--text-muted);font-size:12px\">${text.length} chars</span></div><div class="preview-body">${this.renderMarkdown(text.slice(0, 2000))}</div>`;
+          } catch (e) {
+            preview.innerText = text.slice(0, 2000);
+          }
+          const fileName = document.getElementById('playgroundMdFileName');
+          if (fileName) fileName.textContent = file.name;
+          UI.showToast('Model.md loaded', 'success');
+        } catch (err) {
+          UI.showToast('Failed to read file', 'error');
+        }
+      };
+    }
+
+    if (fetchBtn && urlInput) {
+      fetchBtn.onclick = async () => {
+        const url = urlInput.value && urlInput.value.trim();
+        if (!url) {
+          UI.showToast('Please provide a URL', 'error');
+          return;
+        }
+        try {
+          const r = await API.request('/admin/playground/fetch_md', 'POST', { url });
+          if (r.status !== 200) {
+            throw new Error(r.data && r.data.error ? r.data.error : 'Failed to fetch');
+          }
+          this.systemMdContent = r.data.content || '';
+          preview.style.display = 'block';
+          try {
+            preview.innerHTML = `<div class="preview-header">System prompt preview <span style=\"font-weight:400;color:var(--text-muted);font-size:12px\">${this.systemMdContent.length} chars</span></div><div class="preview-body">${this.renderMarkdown(this.systemMdContent.slice(0, 2000))}</div>`;
+          } catch (e) {
+            preview.innerText = this.systemMdContent.slice(0, 2000);
+          }
+          UI.showToast('Model.md loaded from URL', 'success');
+        } catch (err) {
+          UI.showToast(err.message || 'Failed to fetch .md', 'error');
+        }
+      };
+    }
+
+    if (clearBtn) {
+      clearBtn.onclick = () => {
+        this.systemMdContent = null;
+        preview.style.display = 'none';
+        preview.innerText = '';
+        if (upload) upload.value = '';
+        if (urlInput) urlInput.value = '';
+        const fileName = document.getElementById('playgroundMdFileName');
+        if (fileName) fileName.textContent = '';
+        UI.showToast('System prompt removed', 'success');
+      };
+    }
+  },
+
   onCompareChange() {
     this.compareEnabled = document.getElementById('compareToggle').checked;
     const selB = document.getElementById('playgroundModelSelectB');
@@ -911,6 +986,9 @@ const Playground = {
           this.renderComparison();
         } else {
           const msgs = this.messages.slice();
+          if (this.systemMdContent && this.selectedMode === 'chat') {
+            msgs.unshift({ role: 'system', content: this.systemMdContent });
+          }
           const [rA, rB] = await Promise.all([
             API.request('/admin/playground/chat', 'POST', { key_id: this.selectedKey, model: this.selectedModel, messages: msgs }),
             API.request('/admin/playground/chat', 'POST', { key_id: this.selectedKey, model: this.selectedModelB, messages: msgs })
@@ -946,7 +1024,11 @@ const Playground = {
           this.messages.push({ role: 'assistant', content });
           this.renderMessages();
         } else {
-          const result = await API.request('/admin/playground/chat', 'POST', { key_id: this.selectedKey, model: this.selectedModel, messages: this.messages });
+          const msgs = this.messages.slice();
+          if (this.systemMdContent && this.selectedMode === 'chat') {
+            msgs.unshift({ role: 'system', content: this.systemMdContent });
+          }
+          const result = await API.request('/admin/playground/chat', 'POST', { key_id: this.selectedKey, model: this.selectedModel, messages: msgs });
           this.hideTypingIndicator();
           if (result.status !== 200) {
             throw new Error(result.data.error || 'Request failed');
@@ -1150,6 +1232,220 @@ const Playground = {
   }
 };
 
+const AgentBuilder = {
+  agents: [],
+  currentAgent: null,
+  mdContent: '',
+  selectedKey: null,
+  selectedModel: null,
+
+  async init() {
+    await this.loadAgents();
+    await Playground.loadKeys();
+    await Playground.loadModels();
+    await this.populateKeySelect();
+    await this.populateModelSelect();
+    this.setupEditorHandlers();
+    this.setupChatHandlers();
+  },
+
+  async loadAgents() {
+    const r = await API.request('/admin/agents');
+    if (r.status !== 200) return;
+    this.agents = r.data.agents || [];
+    this.renderList();
+  },
+
+  renderList() {
+    const el = document.getElementById('agentList');
+    el.innerHTML = '';
+    this.agents.forEach(name => {
+      const btn = document.createElement('button');
+      btn.className = 'agent-list-item';
+      btn.textContent = name;
+      btn.onclick = () => this.loadAgent(name);
+      el.appendChild(btn);
+    });
+  },
+
+  async createOrLoad() {
+    const name = document.getElementById('agentNameInput').value.trim();
+    if (!name) { UI.showToast('Agent name is required', 'error'); return; }
+    const r = await API.request('/admin/agents', 'POST', { name });
+    if (r.status === 200) {
+      UI.showToast('Agent ready', 'success');
+      this.currentAgent = r.data.name || name;
+      this.agents = Array.from(new Set([...(this.agents || []), this.currentAgent]));
+      this.renderList();
+      document.getElementById('deleteAgentBtn').style.display = 'inline-block';
+      this.loadAgent(this.currentAgent);
+    }
+  },
+
+  async loadAgent(name) {
+    const r = await API.request(`/admin/agents/${encodeURIComponent(name)}`);
+    if (r.status !== 200) { UI.showToast('Failed to load agent', 'error'); return; }
+    this.currentAgent = name;
+    this.mdContent = r.data.content || '';
+    document.getElementById('agentMdEditor').value = this.mdContent;
+    document.getElementById('agentStatus').textContent = `Editing: ${name}`;
+    document.getElementById('deleteAgentBtn').style.display = 'inline-block';
+    this.populateKeySelect();
+    this.populateModelSelect();
+  },
+
+  async deleteAgent() {
+    if (!this.currentAgent) return;
+    if (!confirm(`Delete agent ${this.currentAgent}?`)) return;
+    const r = await API.request(`/admin/agents/${encodeURIComponent(this.currentAgent)}`, 'DELETE');
+    if (r.status === 200) {
+      UI.showToast('Agent deleted', 'success');
+      this.currentAgent = null;
+      document.getElementById('agentMdEditor').value = '';
+      document.getElementById('agentStatus').textContent = '';
+      document.getElementById('deleteAgentBtn').style.display = 'none';
+      await this.loadAgents();
+    } else {
+      UI.showToast('Delete failed', 'error');
+    }
+  },
+
+  async saveAgent() {
+    if (!this.currentAgent) { UI.showToast('Create or load an agent first', 'error'); return; }
+    const content = document.getElementById('agentMdEditor').value;
+    const r = await API.request(`/admin/agents/${encodeURIComponent(this.currentAgent)}`, 'PUT', { content });
+    if (r.status === 200) UI.showToast('Saved', 'success');
+    else UI.showToast('Save failed', 'error');
+  },
+
+  async populateKeySelect() {
+    const res = await API.request('/admin/user-keys');
+    const select = document.getElementById('agentKeySelect');
+    if (!select) return;
+    select.innerHTML = '<option value="">Select API Key</option>';
+    if (res.status !== 200) return;
+    (res.data || []).forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k.id;
+      opt.textContent = k.name || k.key;
+      select.appendChild(opt);
+    });
+    select.onchange = () => { this.selectedKey = select.value; };
+  },
+
+  async populateModelSelect() {
+    const res = await API.request('/models');
+    const select = document.getElementById('agentModelSelect');
+    if (!select) return;
+    select.innerHTML = '<option value="">Select model</option>';
+    if (res.status !== 200 || !res.data || !res.data.models) return;
+    (res.data.models || []).forEach(m => {
+      const lower = (m || '').toLowerCase();
+      const isEmbeddings = false;
+      if (isEmbeddings && !lower.includes('embed')) return;
+      if (!isEmbeddings && lower.includes('embed')) return;
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      select.appendChild(opt);
+    });
+    select.onchange = () => { this.selectedModel = select.value; };
+  },
+
+  async generateFromChat() {
+    if (!this.currentAgent) { UI.showToast('Create or load an agent first', 'error'); return; }
+    const messages = this.gatherAgentMessages();
+    const model = this.selectedModel || document.getElementById('playgroundModelSelect')?.value || 'gpt-4';
+    const r = await API.request('/admin/agents/generate', 'POST', { agent: this.currentAgent, messages, model });
+    if (r.status === 200) {
+      document.getElementById('agentMdEditor').value = r.data.content || '';
+      UI.showToast('Agent model.md generated', 'success');
+    } else {
+      UI.showToast((r.data && r.data.error) || 'Generate failed', 'error');
+    }
+  },
+
+  gatherAgentMessages() {
+    const msgs = [];
+    const input = document.getElementById('agentChatInput');
+    const text = input.value && input.value.trim();
+    if (text) msgs.push({ role: 'user', content: text });
+    return msgs;
+  },
+
+  async sendAgentChat() {
+    const text = document.getElementById('agentChatInput').value.trim();
+    if (!text) return; 
+    if (!this.currentAgent) { UI.showToast('Load an agent first', 'error'); return; }
+    if (!this.selectedKey) { UI.showToast('Select an API key in Playground to test', 'error'); return; }
+    const model = this.selectedModel || document.getElementById('playgroundModelSelect')?.value;
+    document.getElementById('agentChatInput').value = '';
+    const msgs = [{ role: 'user', content: text }];
+    const list = document.getElementById('agentChatMessages');
+    this.appendChatMessage('user', text, list);
+    this.appendTyping(list);
+    try {
+      const r = await API.request(`/admin/agents/${encodeURIComponent(this.currentAgent)}/chat`, 'POST', { key_id: this.selectedKey, model, messages: msgs });
+      this.removeTyping(list);
+      if (r.status !== 200) { UI.showToast((r.data && r.data.error) || 'Agent chat failed', 'error'); return; }
+      const assistant = r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message;
+      this.appendChatMessage('assistant', assistant && assistant.content || 'No response', list);
+    } catch (e) {
+      this.removeTyping(list);
+      UI.showToast('Network error', 'error');
+    }
+  },
+
+  appendChatMessage(role, content, container) {
+    const div = document.createElement('div');
+    div.className = 'chat-message';
+    const text = role === 'user' ? this.escapeHtml(content) : this.renderMarkdown(content);
+    const avatarSvg = role === 'user' ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/></svg>';
+    div.innerHTML = `<div class="message-header"><div class="message-avatar ${role}">${avatarSvg}</div><span class="message-sender">${role === 'user' ? 'You' : 'Agent'}</span></div><div class="message-text">${text}</div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+  },
+
+  appendTyping(container) {
+    const indicator = document.createElement('div');
+    indicator.className = 'typing-indicator';
+    indicator.innerHTML = '<div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>';
+    container.appendChild(indicator);
+    container.scrollTop = container.scrollHeight;
+  },
+
+  removeTyping(container) {
+    const indicator = container.querySelector('.typing-indicator');
+    if (indicator) indicator.remove();
+  },
+
+  setupEditorHandlers() {
+    document.getElementById('createAgentBtn').onclick = () => this.createOrLoad();
+    document.getElementById('deleteAgentBtn').onclick = () => this.deleteAgent();
+    document.getElementById('saveAgentBtn').onclick = () => this.saveAgent();
+    document.getElementById('generateAgentBtn').onclick = () => this.generateFromChat();
+    document.getElementById('previewAgentBtn').onclick = () => {
+      const v = document.getElementById('agentMdEditor').value;
+      const el = document.getElementById('agentMdEditor');
+      try { document.getElementById('agentMdEditor').value = v; } catch (e) {}
+      UI.showToast('Preview is inline (markdown rendered in chat)', 'success');
+    };
+    document.getElementById('openMdBtn').onclick = () => { if (!this.currentAgent) return; const url = `/admin/agents/raw/${encodeURIComponent(this.currentAgent)}`; window.open(url, '_blank'); };
+  },
+
+  setupChatHandlers() {
+    const input = document.getElementById('agentChatInput');
+    input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; document.getElementById('agentSendBtn').disabled = !(input.value.trim().length > 0); };
+    document.getElementById('agentSendBtn').onclick = () => this.sendAgentChat();
+    document.getElementById('agentChatInput').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendAgentChat(); } };
+    document.getElementById('playgroundKeySelect').onchange = () => { this.selectedKey = document.getElementById('playgroundKeySelect').value; };
+    document.getElementById('playgroundModelSelect').onchange = () => { this.selectedModel = document.getElementById('playgroundModelSelect').value; };
+  },
+
+  renderMarkdown(text) { if (typeof marked !== 'undefined') return marked.parse(text); return this.escapeHtml(text); },
+  escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+};
+
 const Navigation = {
   init() {
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -1177,6 +1473,8 @@ const Navigation = {
       } else if (sectionId === 'playground') {
         Playground.init();
         setTimeout(() => Playground.attachSuggestionHandlers(), 100);
+      } else if (sectionId === 'agent-builder') {
+        AgentBuilder.init();
       }
     }
   }
@@ -1288,7 +1586,10 @@ document.addEventListener('DOMContentLoaded', () => {
   
   Navigation.init();
   Auth.checkAuth();
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  Navigation.navigateTo('overview');
   window.addEventListener('resize', () => {
     Playground.adaptSettingsForMobile();
+    
   });
 });
