@@ -770,9 +770,16 @@ const Playground = {
 
   toggleMobileSettings() {
     try {
-      const settings = document.querySelector('.mobile-settings');
+      const settings = document.querySelector('.mobile-settings') || document.querySelector('.playground-settings');
       const toggleBtn = document.getElementById('settingsToggle');
       if (!settings || !toggleBtn) return;
+      const isMobileSettings = !!document.querySelector('.mobile-settings');
+      if (!isMobileSettings) {
+        settings.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        settings.classList.add('highlight');
+        setTimeout(() => settings.classList.remove('highlight'), 1200);
+        return;
+      }
 
       const isExpanded = settings.classList.toggle('expanded');
       if (isExpanded) {
@@ -811,11 +818,11 @@ const Playground = {
         }
         const optionA = document.createElement('option');
         optionA.value = model;
-        optionA.textContent = model;
+        optionA.textContent = model + (lower.includes('image') ? ' (image)' : '');
         selectA.appendChild(optionA);
         const optionB = document.createElement('option');
         optionB.value = model;
-        optionB.textContent = model;
+        optionB.textContent = model + (lower.includes('image') ? ' (image)' : '');
         selectB.appendChild(optionB);
       });
     }
@@ -1033,7 +1040,7 @@ const Playground = {
           if (result.status !== 200) {
             throw new Error(result.data.error || 'Request failed');
           }
-          const assistantMsg = result.data.choices[0].message;
+          const assistantMsg = result.data.choices && result.data.choices[0] && result.data.choices[0].message ? result.data.choices[0].message : { role: 'assistant', content: 'No response' };
           this.messages.push(assistantMsg);
           this.renderMessages();
         }
@@ -1065,18 +1072,49 @@ const Playground = {
     headerB.textContent = `Model B: ${this.selectedModelB || ''}`;
     colA.appendChild(headerA);
     colB.appendChild(headerB);
+    const filenameFromUrl = (url) => {
+      if (!url) return 'image.png';
+      if (url.startsWith('data:')) {
+        const m = url.match(/^data:image\/([a-zA-Z0-9+.-]+);/);
+        const ext = m ? m[1] : 'png';
+        return `image.${ext}`;
+      }
+      try {
+        const u = new URL(url);
+        const name = u.pathname.split('/').pop();
+        return name || 'image.png';
+      } catch (e) {
+        const parts = url.split('/');
+        return parts[parts.length - 1].split('?')[0] || 'image.png';
+      }
+    };
+
     const renderList = (list, root) => {
       list.forEach(msg => {
         const div = document.createElement('div');
         div.className = 'chat-message';
         const isUser = msg.role === 'user';
-        const messageContent = isUser ? this.escapeHtml(msg.content) : this.renderMarkdown(msg.content);
+        const contentText = isUser ? (msg.content || '') : (msg.content || '');
+        const messageContent = isUser ? this.escapeHtml(contentText) : this.renderMarkdown(contentText);
+        let imagesHtml = '';
+        if (msg && Array.isArray(msg.images) && msg.images.length) {
+          const imgs = msg.images.map(im => {
+            let url = '';
+            if (im && im.image_url) url = im.image_url.url || im.image_url;
+            else if (im && im.url) url = im.url;
+            else url = im;
+            const name = filenameFromUrl(url);
+            const imgHtml = `<a class=\"img-link\" href=\"${this.escapeHtml(url)}\" target=\"_blank\" rel=\"noopener noreferrer\" download=\"${this.escapeHtml(name)}\"><img src=\"${this.escapeHtml(url)}\" alt=\"image\" loading=\"lazy\"/></a>`;
+            return imgHtml;
+          }).join('');
+          imagesHtml = `<div class="message-images">${imgs}</div>`;
+        }
         div.innerHTML = `
           <div class="message-header">
             <div class="message-avatar ${msg.role}"></div>
             <span class="message-sender">${isUser ? 'You' : 'AI Assistant'}</span>
           </div>
-          <div class="message-text">${messageContent}</div>
+          <div class="message-text">${messageContent}${imagesHtml}</div>
         `;
         root.appendChild(div);
       });
@@ -1143,10 +1181,38 @@ const Playground = {
         ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
         : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>';
       
-      const messageContent = isUser 
-        ? this.escapeHtml(msg.content)
-        : this.renderMarkdown(msg.content);
-      
+      const contentText = msg && msg.content ? msg.content : '';
+      const messageContent = isUser ? this.escapeHtml(contentText) : this.renderMarkdown(contentText);
+      let imagesHtml = '';
+      if (msg && Array.isArray(msg.images) && msg.images.length) {
+        const filenameFromUrl = (url) => {
+          if (!url) return 'image.png';
+          if (url.startsWith('data:')) {
+            const m = url.match(/^data:image\/([a-zA-Z0-9+.-]+);/);
+            const ext = m ? m[1] : 'png';
+            return `image.${ext}`;
+          }
+          try {
+            const u = new URL(url);
+            const name = u.pathname.split('/').pop();
+            return name || 'image.png';
+          } catch (e) {
+            const parts = url.split('/');
+            return parts[parts.length - 1].split('?')[0] || 'image.png';
+          }
+        };
+        const imgs = msg.images.map(im => {
+          let url = '';
+          if (im && im.image_url) url = im.image_url.url || im.image_url;
+          else if (im && im.url) url = im.url;
+          else url = im;
+          const name = filenameFromUrl(url);
+          const imgHtml = `<a class="img-link" href="${this.escapeHtml(url)}" target="_blank" rel="noopener noreferrer" download="${this.escapeHtml(name)}"><img src="${this.escapeHtml(url)}" alt="image" loading="lazy"/><span class=\"img-download\">⬇</span></a>`;
+          return imgHtml;
+        }).join('');
+        imagesHtml = `<div class="message-images">${imgs}</div>`;
+      }
+
       div.innerHTML = `
         <div class="message-header">
           <div class="message-avatar ${msg.role}">
@@ -1154,7 +1220,7 @@ const Playground = {
           </div>
           <span class="message-sender">${isUser ? 'You' : 'AI Assistant'}</span>
         </div>
-        <div class="message-text">${messageContent}</div>
+        <div class="message-text">${messageContent}${imagesHtml}</div>
       `;
       
       container.appendChild(div);
@@ -1171,7 +1237,38 @@ const Playground = {
         headerIds: false,
         mangle: false
       });
-      return marked.parse(text);
+      try {
+        let mathBlocks = [];
+        let idx = 0;
+        text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => {
+          const key = `@@MATH${idx++}@@`;
+          mathBlocks.push({ key, content: m, display: true });
+          return key;
+        });
+        text = text.replace(/\$([^\$\n]+?)\$/g, (_, m) => {
+          const key = `@@MATH${idx++}@@`;
+          mathBlocks.push({ key, content: m, display: false });
+          return key;
+        });
+        let html = marked.parse(text);
+        if (typeof katex !== 'undefined') {
+          mathBlocks.forEach(b => {
+            try {
+              const k = katex.renderToString(b.content, { throwOnError: false, displayMode: b.display });
+              html = html.split(b.key).join(k);
+            } catch (e) {
+              html = html.split(b.key).join(this.escapeHtml(b.content));
+            }
+          });
+        } else {
+          mathBlocks.forEach(b => {
+            html = html.split(b.key).join(this.escapeHtml(b.content));
+          });
+        }
+        return html;
+      } catch (e) {
+        return marked.parse(text);
+      }
     }
     return this.escapeHtml(text);
   },
@@ -1348,7 +1445,7 @@ const AgentBuilder = {
       if (!isEmbeddings && lower.includes('embed')) return;
       const opt = document.createElement('option');
       opt.value = m;
-      opt.textContent = m;
+      opt.textContent = m + (lower.includes('image') ? ' (image)' : '');
       select.appendChild(opt);
     });
     select.onchange = () => { this.selectedModel = select.value; };
@@ -1391,7 +1488,7 @@ const AgentBuilder = {
       this.removeTyping(list);
       if (r.status !== 200) { UI.showToast((r.data && r.data.error) || 'Agent chat failed', 'error'); return; }
       const assistant = r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message;
-      this.appendChatMessage('assistant', assistant && assistant.content || 'No response', list);
+      this.appendChatMessage('assistant', assistant || { content: 'No response' }, list);
     } catch (e) {
       this.removeTyping(list);
       UI.showToast('Network error', 'error');
@@ -1401,9 +1498,43 @@ const AgentBuilder = {
   appendChatMessage(role, content, container) {
     const div = document.createElement('div');
     div.className = 'chat-message';
-    const text = role === 'user' ? this.escapeHtml(content) : this.renderMarkdown(content);
+    let textContent = '';
+    let imagesHtml = '';
+    if (typeof content === 'string') {
+      textContent = content;
+    } else if (content && typeof content === 'object') {
+      textContent = content.content || '';
+      if (Array.isArray(content.images) && content.images.length) {
+        const filenameFromUrl = (url) => {
+          if (!url) return 'image.png';
+          if (url.startsWith('data:')) {
+            const m = url.match(/^data:image\/([a-zA-Z0-9+.-]+);/);
+            const ext = m ? m[1] : 'png';
+            return `image.${ext}`;
+          }
+          try {
+            const u = new URL(url);
+            const name = u.pathname.split('/').pop();
+            return name || 'image.png';
+          } catch (e) {
+            const parts = url.split('/');
+            return parts[parts.length - 1].split('?')[0] || 'image.png';
+          }
+        };
+        const imgs = content.images.map(im => {
+          let url = '';
+          if (im && im.image_url) url = im.image_url.url || im.image_url;
+          else if (im && im.url) url = im.url;
+          else url = im;
+          const name = filenameFromUrl(url);
+          return `<a class="img-link" href="${this.escapeHtml(url)}" target="_blank" rel="noopener noreferrer" download="${this.escapeHtml(name)}"><img src="${this.escapeHtml(url)}" alt="image" loading="lazy"/><span class=\"img-download\">⬇</span></a>`;
+        }).join('');
+        imagesHtml = `<div class="message-images">${imgs}</div>`;
+      }
+    }
+    const text = role === 'user' ? this.escapeHtml(textContent) : this.renderMarkdown(textContent);
     const avatarSvg = role === 'user' ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/></svg>';
-    div.innerHTML = `<div class="message-header"><div class="message-avatar ${role}">${avatarSvg}</div><span class="message-sender">${role === 'user' ? 'You' : 'Agent'}</span></div><div class="message-text">${text}</div>`;
+    div.innerHTML = `<div class="message-header"><div class="message-avatar ${role}">${avatarSvg}</div><span class="message-sender">${role === 'user' ? 'You' : 'Agent'}</span></div><div class="message-text">${text}${imagesHtml}</div>`;
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
   },
@@ -1506,7 +1637,7 @@ const AgentBuilder = {
       if (!isEmbeddings && lower.includes('embed')) return;
       const opt = document.createElement('option');
       opt.value = m;
-      opt.textContent = m;
+      opt.textContent = m + (lower.includes('image') ? ' (image)' : '');
       select.appendChild(opt);
     });
   },
@@ -1628,7 +1759,28 @@ const AgentBuilder = {
     UI.showToast('Example loaded into prompt', 'success');
   },
 
-  renderMarkdown(text) { if (typeof marked !== 'undefined') return marked.parse(text); return this.escapeHtml(text); },
+  renderMarkdown(text) { 
+    if (typeof marked !== 'undefined') {
+      try {
+        let mathBlocks = [];
+        let idx = 0;
+        text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => { const key = `@@MATH${idx++}@@`; mathBlocks.push({ key, content: m, display: true }); return key; });
+        text = text.replace(/\$([^\$\n]+?)\$/g, (_, m) => { const key = `@@MATH${idx++}@@`; mathBlocks.push({ key, content: m, display: false }); return key; });
+        let html = marked.parse(text);
+        if (typeof katex !== 'undefined') {
+          mathBlocks.forEach(b => {
+            try { const k = katex.renderToString(b.content, { throwOnError: false, displayMode: b.display }); html = html.split(b.key).join(k); } catch (e) { html = html.split(b.key).join(this.escapeHtml(b.content)); }
+          });
+        } else {
+          mathBlocks.forEach(b => { html = html.split(b.key).join(this.escapeHtml(b.content)); });
+        }
+        return html;
+      } catch (e) {
+        return marked.parse(text);
+      }
+    }
+    return this.escapeHtml(text);
+  },
   escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
 };
 
