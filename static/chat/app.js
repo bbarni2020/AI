@@ -103,6 +103,27 @@ function refreshModeHint() {
     }
 }
 
+function buildFriendlyError(status, payload) {
+    const code = payload && typeof payload.error === 'string' ? payload.error : '';
+    const message = payload && typeof payload.message === 'string' ? payload.message : '';
+    if (code === 'rate_limit_exceeded') {
+        return 'Elérted a rate limitet. Várj egy kicsit, aztán próbáld újra.';
+    }
+    if (code === 'token_limit_exceeded') {
+        return message || 'Elfogyott a tokenkereted erre az időszakra. Szólj egy adminnak vagy várj a resetig.';
+    }
+    if (code === 'ultimate_not_allowed') {
+        return 'Ultimate mód csak meghívott felhasználóknak érhető el. Válassz másik módot vagy kérj engedélyt.';
+    }
+    if (message) {
+        return message;
+    }
+    if (status === 429) {
+        return 'Túl sok kérés érkezett egyszerre. Próbáld újra később.';
+    }
+    return 'Hiba az üzenet küldésekor.';
+}
+
 function renderModeOptions() {
     ensureModeAvailability();
     const container = document.getElementById('advanced-mode-selector');
@@ -476,7 +497,14 @@ async function sendMessage() {
                 loadHistory();
             }
         } else {
-            appendMessage('assistant', 'Hiba az üzenet küldésekor.', null, null, null, null);
+            let payload = null;
+            try {
+                payload = await res.json();
+            } catch (err) {
+                payload = null;
+            }
+            const friendly = buildFriendlyError(res.status, payload);
+            appendMessage('assistant', friendly, null, null, null, null);
         }
     } catch (e) {
         const loadingEl = document.getElementById(loadingId);
