@@ -26,7 +26,9 @@ def init_oauth(app):
 
 @chat_bp.route('/auth/google')
 def google_login():
-    redirect_uri = url_for('chat.auth_callback', _external=True)
+    env = os.getenv('ENVIRONMENT', 'development')
+    scheme = 'https' if env == 'production' else None
+    redirect_uri = url_for('chat.auth_callback', _external=True, _scheme=scheme)
     return oauth.google.authorize_redirect(redirect_uri)
 
 @chat_bp.route('/login')
@@ -133,6 +135,71 @@ def get_conversation(conv_id):
         'messages': conv.messages
     })
 
+@chat_bp.route('/api/chat/models')
+def get_models():
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+        
+    try:
+        with open(os.path.join(current_app.root_path, 'available_models.json'), 'r') as f:
+            models_data = json.load(f)
+        return jsonify(models_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def get_upstream_config():
+    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
+    if upstream_key_env:
+        upstream_key = upstream_key_env
+        provider_id = 1
+    else:
+        provider = ProviderKey.query.filter_by(enabled=True).first()
+        if not provider:
+            raise Exception('No upstream provider configured')
+        upstream_key = provider.api_key
+        provider_id = provider.id
+    
+    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/')
+    return upstream_key, provider_id, upstream_url
+
+def route_request(message, has_files, upstream_key, upstream_url):
+    router_prompt = (
+        "You are a model router. Decide which AI model to use for the user's request.\n"
+        "Available models: \n"
+        "- google/gemini-3-pro-image-preview (Image Generation)\n"
+        "- google/gemini-3-pro-preview (Complex Multimodal, Reasoning, Coding, Files)\n"
+        "- openai/gpt-5.1 (Complex Reasoning, Coding)\n"
+        "- openai/gpt-5-mini (General Chat, Fast)\n"
+        "- nvidia/nemotron-nano-12b-v2-vl (Video/Document Understanding)\n"
+        "Rules:\n"
+        "1. If the user asks to generate, create, or draw an image, use 'google/gemini-3-pro-image-preview'.\n"
+        "2. If the user provides files/images (has_files=True), use 'google/gemini-3-pro-preview'.\n"
+        "3. For complex reasoning or coding, use 'openai/gpt-5.1'.\n"
+        "4. For general chat, use 'openai/gpt-5-mini'.\n"
+        "Return ONLY the model name."
+    )
+    
+    try:
+        resp = requests.post(
+            f"{upstream_url}/chat/completions",
+            headers={'Authorization': f'Bearer {upstream_key}', 'Content-Type': 'application/json'},
+            data=json.dumps({
+                'model': 'openai/gpt-5-mini',
+                'messages': [
+                    {'role': 'system', 'content': router_prompt},
+                    {'role': 'user', 'content': f"Request: {message[:500]}\nHas files: {has_files}"}
+                ],
+                'temperature': 0.0
+            }),
+            timeout=10
+        )
+        if resp.status_code == 200:
+            model = resp.json()['choices'][0]['message']['content'].strip()
+            return model
+    except:
+        pass
+    return 'openai/gpt-5.1'
+
 @chat_bp.post('/api/chat/message')
 def send_message():
     if 'user_id' not in session:
@@ -146,26 +213,37 @@ def send_message():
     data = request.get_json()
     message = data.get('message')
     conv_id = data.get('conversation_id')
+    requested_model = data.get('model')
+    attachments = data.get('attachments', [])
     
-    if not message:
-        return jsonify({'error': 'message required'}), 400
+    if not message and not attachments:
+        return jsonify({'error': 'message or attachments required'}), 400
         
     if conv_id:
         conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
         if not conv:
             return jsonify({'error': 'conversation not found'}), 404
     else:
-        conv = Conversation(user_id=user_id, title=message[:30], messages=[])
+        title = message[:30] if message else "New Chat"
+        conv = Conversation(user_id=user_id, title=title, messages=[])
         db.session.add(conv)
         db.session.commit()
     
+    user_content = message
+    if attachments:
+        user_content = [{"type": "text", "text": message or ""}]
+        for att in attachments:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": att}
+            })
+    
     messages = list(conv.messages)
-    messages.append({'role': 'user', 'content': message})
+    messages.append({'role': 'user', 'content': user_content, 'images': attachments if attachments else None})
     
     user_key = user.user_key
     now = datetime.utcnow()
     
-    # Rate limiting
     if user_key.rate_limit_enabled and user_key.rate_limit_value > 0:
         period_seconds = {'second': 1, 'minute': 60, 'hour': 3600, 'day': 86400}.get(user_key.rate_limit_period, 60)
         start_time = now - timedelta(seconds=period_seconds)
@@ -173,54 +251,63 @@ def send_message():
         if count >= user_key.rate_limit_value:
             return jsonify({'error': 'rate_limit_exceeded'}), 429
 
-    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
-    if upstream_key_env:
-        upstream_key = upstream_key_env
-        provider_id = 1
-    else:
-        provider = ProviderKey.query.filter_by(enabled=True).first()
-        if not provider:
-            return jsonify({'error': 'No upstream provider configured'}), 500
-        upstream_key = provider.api_key
-        provider_id = provider.id
-        
-    upstream_models_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/models'
-    model = 'gpt-3.5-turbo'
     try:
-        r = requests.get(upstream_models_url, headers={'Authorization': f'Bearer {upstream_key}'}, timeout=5)
-        if r.status_code == 200:
-            m_data = r.json()
-            src = m_data.get('data') or m_data.get('models') or []
-            if src:
-                first = src[0]
-                if isinstance(first, dict):
-                    model = first.get('id') or first.get('name')
-                elif isinstance(first, str):
-                    model = first
-    except:
-        pass
+        upstream_key, provider_id, upstream_url = get_upstream_config()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    upstream_chat_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
-    
+    final_model = requested_model
+    if not final_model or final_model == 'AI':
+        final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
+
+    upstream_messages = []
+    for m in messages:
+        content = m.get('content')
+        if isinstance(content, list):
+            valid_content = []
+            for part in content:
+                if part.get('type') == 'image_url' and part.get('image_url', {}).get('url', '').startswith('data:'):
+                    valid_content.append(part)
+                elif part.get('type') == 'text':
+                    valid_content.append(part)
+            upstream_messages.append({'role': m['role'], 'content': valid_content})
+        else:
+            upstream_messages.append({'role': m['role'], 'content': content})
+
     try:
         resp = requests.post(
-            upstream_chat_url,
+            f"{upstream_url}/chat/completions",
             headers={
                 'Authorization': f'Bearer {upstream_key}',
                 'Content-Type': 'application/json'
             },
             data=json.dumps({
-                'model': model,
-                'messages': messages
+                'model': final_model,
+                'messages': upstream_messages
             }),
             timeout=120
         )
         
         if resp.status_code == 200:
             resp_data = resp.json()
-            assistant_msg = resp_data['choices'][0]['message']['content']
+            choice = resp_data['choices'][0]
+            assistant_msg_content = choice['message']['content']
             
-            messages.append({'role': 'assistant', 'content': assistant_msg})
+            response_images = []
+            if 'images' in choice['message']:
+                response_images = choice['message']['images']
+            elif 'image_url' in choice['message']:
+                 response_images = [choice['message']['image_url']]
+            
+            assistant_message_obj = {
+                'role': 'assistant', 
+                'content': assistant_msg_content,
+                'model': final_model
+            }
+            if response_images:
+                assistant_message_obj['images'] = response_images
+
+            messages.append(assistant_message_obj)
             conv.messages = messages
             conv.updated_at = datetime.utcnow()
             
@@ -238,8 +325,10 @@ def send_message():
             
             return jsonify({
                 'conversation_id': conv.id,
-                'message': assistant_msg,
-                'title': conv.title
+                'message': assistant_msg_content,
+                'images': response_images,
+                'title': conv.title,
+                'model': final_model
             })
         else:
             return jsonify({'error': 'Upstream error', 'details': resp.text}), resp.status_code
