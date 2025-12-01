@@ -1,9 +1,30 @@
 import os
+import shutil
+from pathlib import Path
+from datetime import datetime
 from flask import Flask, jsonify, redirect
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 
 db = SQLAlchemy()
+
+def backup_database():
+    db_path = 'instance/data.db'
+    if not os.path.exists(db_path):
+        return
+    
+    backup_dir = 'instance/backups'
+    Path(backup_dir).mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_file = os.path.join(backup_dir, f'data_{timestamp}.db')
+    
+    shutil.copy2(db_path, backup_file)
+    
+    backups = sorted([f for f in os.listdir(backup_dir) if f.startswith('data_') and f.endswith('.db')])
+    if len(backups) > 1:
+        oldest = os.path.join(backup_dir, backups[0])
+        os.remove(oldest)
 
 def create_app():
     load_dotenv()
@@ -13,8 +34,9 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db.init_app(app)
 
-    from .models import ProviderKey, UsageLog, UserKey, CorsSettings
+    from .models import ProviderKey, UsageLog, UserKey, CorsSettings, User, Conversation
     with app.app_context():
+        backup_database()
         db.create_all()
         if not CorsSettings.query.first():
             default_cors = CorsSettings()
@@ -23,15 +45,21 @@ def create_app():
 
     from .routes_admin import admin_bp
     from .routes_proxy import api_bp
+    from .routes_chat import chat_bp, init_oauth
+    
+    init_oauth(app)
+    
     app.register_blueprint(admin_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(chat_bp)
 
     @app.route('/')
     def root():
-        return redirect('/admin')
+        return redirect('/chat')
 
     @app.route('/health')
     def health():
         return jsonify({'ok': True})
 
     return app
+

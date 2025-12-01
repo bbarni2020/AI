@@ -1784,6 +1784,74 @@ const AgentBuilder = {
   escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
 };
 
+const Users = {
+  users: [],
+
+  async loadUsers() {
+    const result = await API.request('/admin/users');
+    if (result.status === 200) {
+      this.users = result.data || [];
+      this.renderTable();
+    }
+  },
+
+  renderTable() {
+    const tbody = document.querySelector('#usersTable tbody');
+    const emptyState = document.getElementById('usersEmptyState');
+    
+    tbody.innerHTML = '';
+    
+    if (this.users.length === 0) {
+      emptyState.style.display = 'block';
+      return;
+    }
+    
+    emptyState.style.display = 'none';
+    
+    this.users.forEach(user => {
+      const row = document.createElement('tr');
+      const created = new Date(user.created_at).toLocaleDateString();
+      
+      row.innerHTML = `
+        <td><strong>${this.escapeHtml(user.name)}</strong></td>
+        <td>${this.escapeHtml(user.email)}</td>
+        <td>${created}</td>
+        <td>${user.key_id || '-'}</td>
+        <td>
+          <div class="table-actions">
+            <button class="btn-delete" data-id="${user.id}">Delete</button>
+          </div>
+        </td>
+      `;
+      
+      tbody.appendChild(row);
+    });
+    
+    tbody.querySelectorAll('.btn-delete').forEach(btn => {
+      btn.onclick = () => this.deleteUser(btn.dataset.id);
+    });
+  },
+
+  async deleteUser(uid) {
+    const user = this.users.find(u => u.id == uid);
+    if (!user || !confirm(`Delete user "${user.name}" (${user.email})?`)) return;
+    
+    const result = await API.request(`/admin/users/${uid}`, 'DELETE');
+    if (result.status === 200) {
+      UI.showToast('User deleted successfully', 'success');
+      this.loadUsers();
+    } else {
+      UI.showToast('Failed to delete user', 'error');
+    }
+  },
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+};
+
 const Navigation = {
   init() {
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -1813,6 +1881,8 @@ const Navigation = {
         setTimeout(() => Playground.attachSuggestionHandlers(), 100);
       } else if (sectionId === 'agent-builder') {
         AgentBuilder.init();
+      } else if (sectionId === 'users') {
+        Users.loadUsers();
       }
     }
   }

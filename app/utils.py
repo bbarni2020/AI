@@ -3,6 +3,11 @@ from sqlalchemy import func
 from . import db
 from .models import ProviderKey, UsageLog
 
+import secrets
+
+def generate_api_key():
+    return 'sk_' + secrets.token_urlsafe(48)
+
 def mask_key(k):
     if not k or len(k) < 8:
         return '****'

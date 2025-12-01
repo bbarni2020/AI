@@ -47,3 +47,26 @@ class CorsSettings(db.Model):
     allow_credentials = db.Column(db.Boolean, default=False, nullable=False)
     max_age = db.Column(db.Integer, default=3600, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    name = db.Column(db.String(120), nullable=True)
+    picture = db.Column(db.String(512), nullable=True)
+    google_id = db.Column(db.String(120), unique=True, nullable=True)
+    user_key_id = db.Column(db.Integer, db.ForeignKey('user_keys.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    
+    user_key = db.relationship('UserKey', backref='user', uselist=False)
+
+class Conversation(db.Model):
+    __tablename__ = 'conversations'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    title = db.Column(db.String(200), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    messages = db.Column(db.JSON, default=list, nullable=False)
+
+    user = db.relationship('User', backref='conversations')

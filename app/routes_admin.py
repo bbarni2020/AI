@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, session, current_app
 from sqlalchemy import func, cast, Date
-from .models import ProviderKey, UserKey, UsageLog, CorsSettings
+from .models import ProviderKey, UserKey, UsageLog, CorsSettings, User
 from . import db
 from .utils import mask_key
 
@@ -631,4 +631,26 @@ def agent_chat(agent):
             return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
     except Exception as e:
         return jsonify({'error': str(e)}), 502
+
+@admin_bp.get('/users')
+def list_users():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    users = User.query.order_by(User.created_at.desc()).all()
+    return jsonify([{
+        'id': u.id,
+        'email': u.email,
+        'name': u.name,
+        'created_at': u.created_at.isoformat(),
+        'key_id': u.user_key_id
+    } for u in users])
+
+@admin_bp.delete('/users/<int:uid>')
+def delete_user(uid):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    u = User.query.get_or_404(uid)
+    db.session.delete(u)
+    db.session.commit()
+    return jsonify({'ok': True})
 
