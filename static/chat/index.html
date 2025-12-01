@@ -45,9 +45,26 @@
             <div class="input-container">
                 <div class="input-wrapper-col">
                     <div class="model-selector-container">
-                        <select id="model-select" class="model-select">
-                            <option value="AI">AI (Auto)</option>
-                        </select>
+                        <div class="mode-config-toggle">
+                            <button type="button" class="mode-toggle-btn active" data-mode="smart">Automatikus</button>
+                            <button type="button" class="mode-toggle-btn" data-mode="manual">Manuális</button>
+                        </div>
+                        <div id="smart-mode-panel" class="mode-panel active">
+                            <div class="mode-selector-block">
+                                <div class="mode-selector-top">
+                                    <span>Fejlett mód</span>
+                                    <span id="mode-hint" class="mode-hint"></span>
+                                </div>
+                                <div id="advanced-mode-selector" class="mode-pill-row"></div>
+                            </div>
+                        </div>
+                        <div id="manual-mode-panel" class="mode-panel hidden-panel">
+                            <div class="manual-select-row">
+                                <select id="model-select" class="model-select">
+                                    <option value="AI">AI (Auto)</option>
+                                </select>
+                            </div>
+                        </div>
                         <label class="web-toggle">
                             <input type="checkbox" id="web-search-toggle">
                             <span>Web keresés</span>

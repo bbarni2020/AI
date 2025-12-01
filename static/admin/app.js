@@ -1811,12 +1811,30 @@ const Users = {
     this.users.forEach(user => {
       const row = document.createElement('tr');
       const created = new Date(user.created_at).toLocaleDateString();
+      const ultimateState = Boolean(user.ultimate_enabled);
+      const statusTitle = ultimateState ? 'Ultimate engedélyezve' : 'Ultimate letiltva';
+      const statusHint = ultimateState ? 'Ultimate mód és ensemble funkciók elérhetőek.' : 'Nincs hozzáférés Ultimate módhoz.';
+      const actionLabel = ultimateState ? 'Letiltás' : 'Engedélyezés';
       
       row.innerHTML = `
         <td><strong>${this.escapeHtml(user.name)}</strong></td>
         <td>${this.escapeHtml(user.email)}</td>
         <td>${created}</td>
         <td>${user.key_id || '-'}</td>
+        <td>
+          <div class="ultimate-cell ${ultimateState ? 'active' : ''}">
+            <div class="ultimate-status">
+              <span class="ultimate-status-dot"></span>
+              <div class="ultimate-status-text">
+                <strong>${statusTitle}</strong>
+                <span>${statusHint}</span>
+              </div>
+            </div>
+            <button class="ultimate-toggle" data-id="${user.id}" data-enabled="${ultimateState ? '1' : '0'}">
+              ${actionLabel}
+            </button>
+          </div>
+        </td>
         <td>
           <div class="table-actions">
             <button class="btn-delete" data-id="${user.id}">Delete</button>
@@ -1830,6 +1848,9 @@ const Users = {
     tbody.querySelectorAll('.btn-delete').forEach(btn => {
       btn.onclick = () => this.deleteUser(btn.dataset.id);
     });
+    tbody.querySelectorAll('.ultimate-toggle').forEach(btn => {
+      btn.onclick = () => this.toggleUltimate(btn.dataset.id, btn.dataset.enabled === '1');
+    });
   },
 
   async deleteUser(uid) {
@@ -1842,6 +1863,17 @@ const Users = {
       this.loadUsers();
     } else {
       UI.showToast('Failed to delete user', 'error');
+    }
+  },
+
+  async toggleUltimate(uid, currentlyEnabled) {
+    const newState = !currentlyEnabled;
+    const result = await API.request(`/admin/users/${uid}/ultimate`, 'PUT', { enabled: newState });
+    if (result.status === 200) {
+      UI.showToast(newState ? 'Ultimate engedélyezve' : 'Ultimate letiltva', 'success');
+      this.loadUsers();
+    } else {
+      UI.showToast('Ultimate frissítése sikertelen', 'error');
     }
   },
 

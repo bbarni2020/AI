@@ -56,6 +56,17 @@ body, html {
     font-size: 14px;
 }
 
+.ultimate-badge {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--primary-color);
+    border: 1px solid rgba(35, 131, 226, 0.6);
+    border-radius: 999px;
+    padding: 2px 6px;
+    margin-left: 4px;
+}
+
 .avatar {
     width: 24px;
     height: 24px;
@@ -304,6 +315,7 @@ body, html {
     align-items: center;
     gap: 12px;
     margin-top: 8px;
+    flex-wrap: wrap;
 }
 
 .message-model {
@@ -338,6 +350,48 @@ body, html {
 .copy-btn.copied {
     color: var(--primary-color);
     border-color: var(--primary-color);
+}
+
+.ultimate-breakdown {
+    margin-top: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: #202020;
+    padding: 8px 12px;
+}
+
+.ultimate-breakdown summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+    outline: none;
+}
+
+.ultimate-breakdown[open] summary {
+    color: var(--text-color);
+}
+
+.ultimate-breakdown-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.ultimate-breakdown-item {
+    padding: 8px;
+    border-radius: 6px;
+    background-color: #181818;
+    border: 1px solid var(--border-color);
+}
+
+.ultimate-breakdown-item strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: var(--text-color);
 }
 
 .message-sources {
@@ -502,10 +556,148 @@ body, html {
 
 .model-selector-container {
     display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+}
+
+.mode-config-toggle {
+    display: inline-flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.mode-toggle-btn {
+    background-color: #202020;
+    color: var(--text-color);
+    border: 1px solid var(--input-border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+}
+
+.mode-toggle-btn.active {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background-color: #1f1f1f;
+}
+
+.mode-panel {
+    width: 100%;
+}
+
+.mode-panel.hidden-panel {
+    display: none;
+}
+
+.manual-select-row {
+    display: flex;
+    width: 100%;
+}
+
+.manual-select-row .model-select {
+    flex: 1;
+}
+
+.model-selector-row {
+    display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
+}
+
+.mode-selector-block {
+    border: 1px solid var(--input-border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background-color: #202020;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mode-selector-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.mode-hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    min-height: 14px;
+}
+
+.mode-hint.alert {
+    color: #ff8a65;
+}
+
+.mode-pill-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+}
+
+.mode-pill {
+    border: 1px solid var(--input-border);
+    border-radius: 10px;
+    padding: 10px;
+    background-color: #191919;
+    color: var(--text-color);
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+    width: 100%;
+    text-align: left;
+    outline: none;
+}
+
+.mode-pill:hover {
+    border-color: #3a3a3a;
+}
+
+.mode-pill.active {
+    border-color: var(--primary-color);
+    background-color: #1f1f1f;
+    box-shadow: inset 0 0 0 1px rgba(35, 131, 226, 0.2);
+}
+
+.mode-pill.locked {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mode-pill:focus-visible {
+    border-color: var(--primary-color);
+}
+
+.mode-pill:focus-visible {
+    border-color: var(--primary-color);
+}
+
+.mode-pill .mode-name {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.mode-pill .mode-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.mode-pill .mode-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--primary-color);
 }
 
 .model-select {
@@ -532,6 +724,10 @@ body, html {
 .web-toggle input {
     cursor: pointer;
     accent-color: var(--primary-color);
+}
+
+.web-toggle span {
+    white-space: nowrap;
 }
 
 .input-box-wrapper {

@@ -1,5 +1,6 @@
 import os
 import json
+import unicodedata
 import requests
 from flask import Blueprint, session, redirect, url_for, request, jsonify, current_app
 from authlib.integrations.flask_client import OAuth
@@ -11,6 +12,176 @@ from sqlalchemy import func
 
 chat_bp = Blueprint('chat', __name__)
 oauth = OAuth()
+
+class UpstreamError(Exception):
+    def __init__(self, message, status_code=500):
+        super().__init__(message)
+        self.status_code = status_code
+
+MODE_ALIASES = {
+    'general': 'general',
+    'altalanos': 'general',
+    'normal': 'general',
+    'pontos': 'precise',
+    'precise': 'precise',
+    'turbo': 'turbo',
+    'ultimate': 'ultimate',
+    'manual': 'manual'
+}
+
+DEFAULT_PRECISE_MODEL = os.getenv('PRECISE_MODEL', 'openai/gpt-5.1')
+DEFAULT_TURBO_MODEL = os.getenv('TURBO_MODEL', 'google/gemini-3-pro-preview')
+DEFAULT_ULTIMATE_MODELS = [
+    os.getenv('ULTIMATE_MODEL_A', 'openai/gpt-5.1'),
+    os.getenv('ULTIMATE_MODEL_B', 'google/gemini-3-pro-preview')
+]
+DEFAULT_ULTIMATE_FUSION_MODEL = os.getenv('ULTIMATE_FUSION_MODEL', 'openai/gpt-5.1')
+
+def normalize_mode(value):
+    if not value:
+        return 'general'
+    raw = str(value).strip().lower()
+    folded = ''.join(ch for ch in unicodedata.normalize('NFKD', raw) if unicodedata.category(ch) != 'Mn')
+    return MODE_ALIASES.get(folded, 'general')
+
+def trim_text(value, limit=2000):
+    if value is None:
+        return ''
+    text = str(value).strip()
+    if len(text) > limit:
+        return text[:limit] + '...'
+    return text
+
+def build_history_digest(history, limit=4):
+    digest = []
+    slice_source = history[-limit:]
+    for entry in slice_source:
+        content = entry.get('content') if isinstance(entry, dict) else None
+        text = ''
+        if isinstance(content, list):
+            text = ' '.join(part.get('text', '') for part in content if part.get('type') == 'text').strip()
+        elif isinstance(content, str):
+            text = content.strip()
+        if not text:
+            continue
+        digest.append(f"{entry.get('role', 'user')}: {trim_text(text, 400)}")
+    return '\n'.join(digest)
+
+def execute_completion(model_name, messages, upstream_key, upstream_url, temperature=None):
+    payload = {'model': model_name, 'messages': messages}
+    if temperature is not None:
+        payload['temperature'] = temperature
+    resp = requests.post(
+        f"{upstream_url}/chat/completions",
+        headers={'Authorization': f'Bearer {upstream_key}', 'Content-Type': 'application/json'},
+        data=json.dumps(payload),
+        timeout=120
+    )
+    if resp.status_code != 200:
+        raise UpstreamError(resp.text or 'Upstream error', resp.status_code)
+    data = resp.json()
+    choice = data['choices'][0]['message']
+    content = choice.get('content')
+    response_images = []
+    if isinstance(choice.get('images'), list):
+        response_images = choice['images']
+    elif choice.get('image_url'):
+        response_images = [choice['image_url']]
+    return content, response_images, data
+
+def resolve_ultimate_models():
+    configured = current_app.config.get('ULTIMATE_MODELS')
+    if isinstance(configured, str):
+        values = [item.strip() for item in configured.split(',') if item.strip()]
+    elif isinstance(configured, (list, tuple)):
+        values = [item for item in configured if item]
+    else:
+        values = []
+    base = values or [m for m in DEFAULT_ULTIMATE_MODELS if m]
+    seen = []
+    for model_name in base:
+        if model_name and model_name not in seen:
+            seen.append(model_name)
+    return seen
+
+def resolve_fusion_model():
+    fusion = current_app.config.get('ULTIMATE_FUSION_MODEL')
+    return fusion or DEFAULT_ULTIMATE_FUSION_MODEL
+
+def run_ultimate_ensemble(upstream_messages, history_messages, upstream_key, upstream_url, original_prompt, web_context):
+    models = resolve_ultimate_models()
+    fusion_model = resolve_fusion_model()
+    results = []
+    usage = {'prompt': 0, 'response': 0, 'total': 0}
+    for model_name in models:
+        try:
+            content, images, data = execute_completion(model_name, upstream_messages, upstream_key, upstream_url)
+            results.append({
+                'model': model_name,
+                'content': content or '',
+                'images': images
+            })
+            pt, rt, tt = extract_tokens(data)
+            usage['prompt'] += pt
+            usage['response'] += rt
+            usage['total'] += tt
+        except UpstreamError as exc:
+            current_app.logger.warning('Ultimate candidate failed (%s): %s', model_name, exc)
+    if not results:
+        raise UpstreamError('All ultimate candidate models failed', 502)
+    if len(results) == 1:
+        return {
+            'content': results[0]['content'],
+            'images': results[0]['images'],
+            'model': results[0]['model'],
+            'candidates': results,
+            'usage': usage,
+            'aggregator_model': results[0]['model']
+        }
+    history_digest = build_history_digest(history_messages)
+    candidate_sections = []
+    for idx, item in enumerate(results, start=1):
+        snippet = trim_text(item['content'], 4000)
+        candidate_sections.append(f"Model {idx} ({item['model']}):\n{snippet or '(empty)'}")
+    web_section = ''
+    if web_context:
+        formatted = []
+        for idx, entry in enumerate(web_context[:3], start=1):
+            title = entry.get('title') or 'Result'
+            content = entry.get('content') or ''
+            formatted.append(f"[{idx}] {title}: {trim_text(content, 400)}")
+        web_section = '\n'.join(formatted)
+    prompt_parts = []
+    if history_digest:
+        prompt_parts.append(f"Conversation summary:\n{history_digest}")
+    if original_prompt:
+        prompt_parts.append(f"Latest request:\n{original_prompt}")
+    if web_section:
+        prompt_parts.append(f"Web findings:\n{web_section}")
+    prompt_parts.append("Candidate answers:\n" + '\n\n'.join(candidate_sections))
+    fusion_messages = [
+        {
+            'role': 'system',
+            'content': 'You merge multiple elite AI answers into one decisive response. Compare their reasoning, resolve conflicts, cite the strongest evidence, and answer in the user\'s language with SAT/Olympiad-level precision. Prefer accuracy over style.'
+        },
+        {
+            'role': 'user',
+            'content': '\n\n'.join(prompt_parts)
+        }
+    ]
+    content, images, fusion_data = execute_completion(fusion_model, fusion_messages, upstream_key, upstream_url, temperature=0.2)
+    pt, rt, tt = extract_tokens(fusion_data)
+    usage['prompt'] += pt
+    usage['response'] += rt
+    usage['total'] += tt
+    return {
+        'content': content or '',
+        'images': images,
+        'model': 'ultimate-ensemble',
+        'candidates': results,
+        'usage': usage,
+        'aggregator_model': fusion_model
+    }
 
 def init_oauth(app):
     oauth.init_app(app)
@@ -102,7 +273,8 @@ def get_me():
     return jsonify({
         'name': user.name,
         'picture': user.picture,
-        'email': user.email
+        'email': user.email,
+        'ultimate_enabled': bool(user.ultimate_enabled)
     })
 
 @chat_bp.route('/api/chat/history')
@@ -224,12 +396,15 @@ def send_message():
     if not user:
         return jsonify({'error': 'user not found'}), 404
         
-    data = request.get_json()
+    data = request.get_json() or {}
     message = data.get('message')
     conv_id = data.get('conversation_id')
     requested_model = data.get('model')
     attachments = data.get('attachments', [])
     use_web_search = bool(data.get('use_web_search'))
+    mode = normalize_mode(data.get('mode'))
+    if mode == 'ultimate' and not user.ultimate_enabled:
+        return jsonify({'error': 'ultimate_not_allowed'}), 403
     web_context = []
     
     if not message and not attachments:
@@ -278,10 +453,6 @@ def send_message():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-    final_model = requested_model
-    if not final_model or final_model == 'AI':
-        final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
-
     context_message = None
     if web_context:
         snippets = []
@@ -312,67 +483,87 @@ def send_message():
     if context_message:
         upstream_messages.insert(0, context_message)
 
+    meta = {'mode': mode}
+    response_images = []
+    assistant_msg_content = ''
+    usage_prompt = 0
+    usage_response = 0
+    usage_total = 0
     try:
-        resp = requests.post(
-            f"{upstream_url}/chat/completions",
-            headers={
-                'Authorization': f'Bearer {upstream_key}',
-                'Content-Type': 'application/json'
-            },
-            data=json.dumps({
-                'model': final_model,
-                'messages': upstream_messages
-            }),
-            timeout=120
-        )
-        
-        if resp.status_code == 200:
-            resp_data = resp.json()
-            choice = resp_data['choices'][0]
-            assistant_msg_content = choice['message']['content']
-            
-            response_images = []
-            if 'images' in choice['message']:
-                response_images = choice['message']['images']
-            elif 'image_url' in choice['message']:
-                 response_images = [choice['message']['image_url']]
-            
-            assistant_message_obj = {
-                'role': 'assistant', 
-                'content': assistant_msg_content,
-                'model': final_model
-            }
-            if response_images:
-                assistant_message_obj['images'] = response_images
-            if web_context:
-                assistant_message_obj['sources'] = web_context
-
-            messages.append(assistant_message_obj)
-            conv.messages = messages
-            conv.updated_at = datetime.utcnow()
-            
-            pt, rt, tt = extract_tokens(resp_data)
-            ul = UsageLog(
-                provider_key_id=provider_id,
-                user_key_id=user_key.id,
-                request_tokens=pt,
-                response_tokens=rt,
-                total_tokens=tt
-            )
-            db.session.add(ul)
-            user_key.last_used_at = datetime.utcnow()
-            db.session.commit()
-            
-            return jsonify({
-                'conversation_id': conv.id,
-                'message': assistant_msg_content,
-                'images': response_images,
-                'title': conv.title,
-                'model': final_model,
-                'sources': web_context
-            })
+        if mode == 'ultimate':
+            ensemble = run_ultimate_ensemble(upstream_messages, messages, upstream_key, upstream_url, message or '', web_context)
+            assistant_msg_content = ensemble['content']
+            response_images = ensemble['images']
+            final_model = ensemble['model']
+            usage_prompt = ensemble['usage']['prompt']
+            usage_response = ensemble['usage']['response']
+            usage_total = ensemble['usage']['total']
+            meta['ultimate_candidates'] = [
+                {
+                    'model': item['model'],
+                    'excerpt': trim_text(item['content'], 1200)
+                }
+                for item in ensemble['candidates']
+            ]
+            meta['aggregator_model'] = ensemble['aggregator_model']
         else:
-            return jsonify({'error': 'Upstream error', 'details': resp.text}), resp.status_code
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            if mode == 'general':
+                if requested_model and requested_model != 'AI':
+                    final_model = requested_model
+                else:
+                    final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
+            elif mode == 'precise':
+                final_model = DEFAULT_PRECISE_MODEL
+            elif mode == 'turbo':
+                final_model = DEFAULT_TURBO_MODEL
+            elif mode == 'manual':
+                if requested_model and requested_model != 'AI':
+                    final_model = requested_model
+                else:
+                    final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
+            else:
+                final_model = DEFAULT_PRECISE_MODEL
+            assistant_msg_content, response_images, resp_data = execute_completion(final_model, upstream_messages, upstream_key, upstream_url)
+            usage_prompt, usage_response, usage_total = extract_tokens(resp_data)
+    except UpstreamError as exc:
+        return jsonify({'error': 'Upstream error', 'details': str(exc)}), exc.status_code
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+    assistant_message_obj = {
+        'role': 'assistant',
+        'content': assistant_msg_content or '',
+        'model': final_model
+    }
+    if response_images:
+        assistant_message_obj['images'] = response_images
+    if web_context:
+        assistant_message_obj['sources'] = web_context
+    if meta:
+        assistant_message_obj['meta'] = meta
+
+    messages.append(assistant_message_obj)
+    conv.messages = messages
+    conv.updated_at = datetime.utcnow()
+
+    ul = UsageLog(
+        provider_key_id=provider_id,
+        user_key_id=user_key.id,
+        request_tokens=usage_prompt,
+        response_tokens=usage_response,
+        total_tokens=usage_total
+    )
+    db.session.add(ul)
+    user_key.last_used_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({
+        'conversation_id': conv.id,
+        'message': assistant_msg_content,
+        'images': response_images,
+        'title': conv.title,
+        'model': final_model,
+        'sources': web_context,
+        'meta': meta,
+        'mode': mode
+    })

@@ -57,6 +57,7 @@ class User(db.Model):
     google_id = db.Column(db.String(120), unique=True, nullable=True)
     user_key_id = db.Column(db.Integer, db.ForeignKey('user_keys.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    ultimate_enabled = db.Column(db.Boolean, default=False, nullable=False)
     
     user_key = db.relationship('UserKey', backref='user', uselist=False)
 

@@ -5,6 +5,7 @@ from datetime import datetime
 from flask import Flask, jsonify, redirect
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
+from sqlalchemy import inspect, text
 
 db = SQLAlchemy()
 
@@ -38,6 +39,11 @@ def create_app():
     with app.app_context():
         backup_database()
         db.create_all()
+        inspector = inspect(db.engine)
+        user_columns = {c['name'] for c in inspector.get_columns('users')}
+        if 'ultimate_enabled' not in user_columns:
+            db.session.execute(text('ALTER TABLE users ADD COLUMN ultimate_enabled BOOLEAN NOT NULL DEFAULT 0'))
+            db.session.commit()
         if not CorsSettings.query.first():
             default_cors = CorsSettings()
             db.session.add(default_cors)

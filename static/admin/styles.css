@@ -527,6 +527,93 @@ body {
     background: rgba(59, 130, 246, 0.15);
 }
 
+.ultimate-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+    background: rgba(0, 0, 0, 0.015);
+}
+
+[data-theme="dark"] .ultimate-cell {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.ultimate-cell.active {
+    border-color: #2eaadc;
+    background: rgba(46, 170, 220, 0.08);
+}
+
+.ultimate-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex: 1;
+}
+
+.ultimate-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #9ca3af;
+    margin-top: 5px;
+    flex-shrink: 0;
+    transition: var(--transition);
+}
+
+.ultimate-cell.active .ultimate-status-dot {
+    background: #2eaadc;
+    box-shadow: 0 0 0 4px rgba(46, 170, 220, 0.2);
+}
+
+.ultimate-status-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.ultimate-status-text strong {
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.ultimate-toggle {
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: #fff;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .ultimate-toggle {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+}
+
+.ultimate-toggle:hover {
+    background: rgba(46, 170, 220, 0.1);
+    border-color: #2eaadc;
+    color: #2eaadc;
+}
+
+.ultimate-cell.active .ultimate-toggle {
+    border-color: #2eaadc;
+    color: #2eaadc;
+}
+
 .btn-copy {
     padding: 8px 12px;
     background: rgba(0, 0, 0, 0.04);

@@ -642,7 +642,8 @@ def list_users():
         'email': u.email,
         'name': u.name,
         'created_at': u.created_at.isoformat(),
-        'key_id': u.user_key_id
+        'key_id': u.user_key_id,
+        'ultimate_enabled': bool(u.ultimate_enabled)
     } for u in users])
 
 @admin_bp.delete('/users/<int:uid>')
@@ -653,4 +654,15 @@ def delete_user(uid):
     db.session.delete(u)
     db.session.commit()
     return jsonify({'ok': True})
+
+@admin_bp.put('/users/<int:uid>/ultimate')
+def update_user_ultimate(uid):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    user = User.query.get_or_404(uid)
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get('enabled'))
+    user.ultimate_enabled = enabled
+    db.session.commit()
+    return jsonify({'ultimate_enabled': user.ultimate_enabled})
 

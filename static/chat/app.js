@@ -1,10 +1,31 @@
 let currentConversationId = null;
 let selectedFiles = [];
+let selectedMode = 'general';
+let ultimateUnlocked = false;
+let modeHintResetHandle = null;
+let modeControl = 'smart';
+
+const MODE_ORDER = ['general', 'precise', 'turbo', 'ultimate'];
+const MODE_COPY = {
+    general: { label: 'Általános', desc: 'Gyors és megbízható válaszok.', tag: 'Auto' },
+    precise: { label: 'Pontos', desc: 'Maximális pontosság és részletek.', tag: 'GPT-5.1' },
+    turbo: { label: 'Turbo', desc: 'Legerősebb elérhető modellek.', tag: 'Gemini Pro' },
+    ultimate: { label: 'Ultimate', desc: 'Két modell + egyesítés.', tag: 'Invite only' }
+};
+const MODE_DISPLAY = {
+    general: 'Általános',
+    precise: 'Pontos',
+    turbo: 'Turbo',
+    ultimate: 'Ultimate',
+    manual: 'Manuális'
+};
 
 document.addEventListener('DOMContentLoaded', () => {
     loadUser();
     loadHistory();
     loadModels();
+    renderModeOptions();
+    initModeSwitcher();
     
     const input = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
@@ -51,6 +72,137 @@ function updateSendButton() {
     }
 }
 
+function ensureModeAvailability() {
+    if (selectedMode === 'ultimate' && !ultimateUnlocked) {
+        selectedMode = 'general';
+    }
+}
+
+function setMode(mode) {
+    selectedMode = mode;
+    renderModeOptions();
+}
+
+function setModeHint(text, isAlert = false) {
+    const hint = document.getElementById('mode-hint');
+    if (!hint) return;
+    hint.textContent = text || '';
+    if (isAlert) {
+        hint.classList.add('alert');
+    } else {
+        hint.classList.remove('alert');
+    }
+}
+
+function refreshModeHint() {
+    if (modeControl === 'manual') {
+        setModeHint('Manuális modell kiválasztás aktív.', false);
+    } else {
+        const info = MODE_COPY[selectedMode];
+        setModeHint(info ? info.desc : '', false);
+    }
+}
+
+function renderModeOptions() {
+    ensureModeAvailability();
+    const container = document.getElementById('advanced-mode-selector');
+    if (!container) return;
+    if (modeHintResetHandle) {
+        clearTimeout(modeHintResetHandle);
+        modeHintResetHandle = null;
+    }
+    container.innerHTML = '';
+    MODE_ORDER.forEach(modeKey => {
+        const info = MODE_COPY[modeKey];
+        if (!info) return;
+        const locked = modeKey === 'ultimate' && !ultimateUnlocked;
+        const pill = document.createElement('div');
+        pill.className = 'mode-pill';
+        if (selectedMode === modeKey) pill.classList.add('active');
+        if (locked) pill.classList.add('locked');
+        pill.setAttribute('role', 'button');
+        pill.tabIndex = 0;
+        if (locked) {
+            pill.setAttribute('aria-disabled', 'true');
+        } else {
+            pill.removeAttribute('aria-disabled');
+        }
+        pill.innerHTML = `
+            <span class="mode-tag">${info.tag}</span>
+            <span class="mode-name">${info.label}</span>
+            <span class="mode-desc">${info.desc}</span>
+        `;
+        if (locked) {
+            const warn = () => {
+                setModeHint('Ultimate csak meghívással érhető el.', true);
+                if (modeHintResetHandle) {
+                    clearTimeout(modeHintResetHandle);
+                }
+                modeHintResetHandle = setTimeout(() => {
+                    refreshModeHint();
+                    modeHintResetHandle = null;
+                }, 2500);
+            };
+            pill.addEventListener('click', warn);
+            pill.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    warn();
+                }
+            });
+        } else {
+            const activate = () => setMode(modeKey);
+            pill.addEventListener('click', activate);
+            pill.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    activate();
+                }
+            });
+        }
+        container.appendChild(pill);
+    });
+    if (modeControl === 'smart') {
+        refreshModeHint();
+    }
+}
+
+function initModeSwitcher() {
+    const buttons = document.querySelectorAll('.mode-toggle-btn');
+    buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const value = btn.dataset.mode === 'manual' ? 'manual' : 'smart';
+            if (value !== modeControl) {
+                applyModeControl(value);
+            }
+        });
+    });
+    applyModeControl(modeControl);
+}
+
+function applyModeControl(value) {
+    modeControl = value === 'manual' ? 'manual' : 'smart';
+    document.querySelectorAll('.mode-toggle-btn').forEach(btn => {
+        const active = btn.dataset.mode === modeControl;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    const smartPanel = document.getElementById('smart-mode-panel');
+    const manualPanel = document.getElementById('manual-mode-panel');
+    if (smartPanel) smartPanel.classList.toggle('hidden-panel', modeControl !== 'smart');
+    if (manualPanel) manualPanel.classList.toggle('hidden-panel', modeControl !== 'manual');
+    const select = document.getElementById('model-select');
+    if (select) {
+        if (modeControl === 'smart') {
+            select.value = 'AI';
+            select.setAttribute('disabled', 'true');
+        } else {
+            select.removeAttribute('disabled');
+        }
+    }
+    refreshModeHint();
+}
+
 async function loadModels() {
     try {
         const res = await fetch('/api/chat/models');
@@ -67,6 +219,7 @@ async function loadModels() {
                 option.textContent = modelName;
                 select.appendChild(option);
             });
+            applyModeControl(modeControl);
         }
     } catch (e) {
         console.error('Failed to load models', e);
@@ -135,13 +288,17 @@ async function loadUser() {
     const res = await fetch('/api/chat/me');
     if (res.ok) {
         const user = await res.json();
+        ultimateUnlocked = !!user.ultimate_enabled;
+        renderModeOptions();
         const profileEl = document.querySelector('.user-profile');
         if (profileEl) {
+            const badge = user.ultimate_enabled ? '<span class="ultimate-badge">Ultimate</span>' : '';
             profileEl.innerHTML = `
                 <div class="avatar">
                     <img src="${user.picture}" alt="${user.name}" class="avatar-img">
                 </div>
                 <span class="username">${user.name}</span>
+                ${badge}
             `;
         }
     }
@@ -236,7 +393,7 @@ async function loadConversation(id) {
     if (res.ok) {
         const data = await res.json();
         container.innerHTML = '';
-        data.messages.forEach(msg => appendMessage(msg.role, msg.content, msg.images, msg.sources, msg.model));
+        data.messages.forEach(msg => appendMessage(msg.role, msg.content, msg.images, msg.sources, msg.model, msg.meta));
         
         document.querySelectorAll('.history-item').forEach(el => el.classList.remove('active'));
         loadHistory(); 
@@ -268,7 +425,7 @@ async function sendMessage() {
         emptyState.remove();
     }
 
-    appendMessage('user', text, attachments, null, null);
+    appendMessage('user', text, attachments, null, null, null);
 
     const loadingId = 'loading-' + Date.now();
     appendLoading(loadingId);
@@ -282,7 +439,8 @@ async function sendMessage() {
                 conversation_id: currentConversationId,
                 model: model,
                 attachments: attachments,
-                use_web_search: !!useWebSearch
+                use_web_search: !!useWebSearch,
+                mode: modeControl === 'manual' ? 'manual' : selectedMode
             })
         });
 
@@ -291,18 +449,18 @@ async function sendMessage() {
 
         if (res.ok) {
             const data = await res.json();
-            appendMessage('assistant', data.message, data.images, data.sources, data.model);
+            appendMessage('assistant', data.message, data.images, data.sources, data.model, data.meta);
             if (!currentConversationId) {
                 currentConversationId = data.conversation_id;
                 loadHistory();
             }
         } else {
-            appendMessage('assistant', 'Hiba az üzenet küldésekor.', null, null, null);
+            appendMessage('assistant', 'Hiba az üzenet küldésekor.', null, null, null, null);
         }
     } catch (e) {
         const loadingEl = document.getElementById(loadingId);
         if (loadingEl) loadingEl.remove();
-        appendMessage('assistant', 'Hálózati hiba.', null, null, null);
+        appendMessage('assistant', 'Hálózati hiba.', null, null, null, null);
     }
 }
 
@@ -327,7 +485,7 @@ function appendLoading(id) {
     container.scrollTop = container.scrollHeight;
 }
 
-function appendMessage(role, text, images, sources, modelName) {
+function appendMessage(role, text, images, sources, modelName, meta) {
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = `message ${role}`;
@@ -392,7 +550,12 @@ function appendMessage(role, text, images, sources, modelName) {
         metaRow.className = 'message-meta';
             const modelSpan = document.createElement('span');
             modelSpan.className = 'message-model';
-            modelSpan.textContent = modelName ? `Model: ${modelName}` : '';
+            let modelLabel = modelName ? `Model: ${modelName}` : '';
+            const modeLabel = meta && meta.mode ? MODE_DISPLAY[meta.mode] : null;
+            if (modeLabel) {
+                modelLabel = modelLabel ? `${modelLabel} • ${modeLabel}` : modeLabel;
+            }
+            modelSpan.textContent = modelLabel;
             const actions = document.createElement('div');
             actions.className = 'message-actions';
             const copyBtn = document.createElement('button');
@@ -416,6 +579,30 @@ function appendMessage(role, text, images, sources, modelName) {
             return `<div>[${idx + 1}] <a href="${href}" target="_blank" rel="noopener">${title}</a></div>`;
         }).join('');
         content.appendChild(sourcesDiv);
+    }
+
+    if (meta && meta.mode === 'ultimate' && Array.isArray(meta.ultimate_candidates) && meta.ultimate_candidates.length) {
+        const breakdown = document.createElement('details');
+        breakdown.className = 'ultimate-breakdown';
+        breakdown.innerHTML = '<summary>Ultimate bontás</summary>';
+        const list = document.createElement('div');
+        list.className = 'ultimate-breakdown-list';
+        meta.ultimate_candidates.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'ultimate-breakdown-item';
+            const modelLabel = escapeHtml(item?.model || 'Model');
+            const excerpt = escapeHtml(item?.excerpt || '').replace(/\n/g, '<br>');
+            row.innerHTML = `<strong>${modelLabel}</strong><div>${excerpt}</div>`;
+            list.appendChild(row);
+        });
+        if (meta.aggregator_model) {
+            const agg = document.createElement('div');
+            agg.className = 'ultimate-breakdown-item';
+            agg.innerHTML = `<strong>Kombináló: ${escapeHtml(meta.aggregator_model)}</strong><div>Végső válasz</div>`;
+            list.appendChild(agg);
+        }
+        breakdown.appendChild(list);
+        content.appendChild(breakdown);
     }
     
     if (metaRow) {
