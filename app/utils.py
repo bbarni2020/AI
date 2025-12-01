@@ -1,9 +1,13 @@
 import datetime
+import os
+import secrets
+
+import requests
+from bs4 import BeautifulSoup
 from sqlalchemy import func
+
 from . import db
 from .models import ProviderKey, UsageLog
-
-import secrets
 
 def generate_api_key():
     return 'sk_' + secrets.token_urlsafe(48)
@@ -47,3 +51,60 @@ def extract_tokens(data):
         return pt, ct, tt
     except Exception:
         return 0, 0, 0
+
+
+def tavily_search(query, max_results=3):
+    api_key = os.getenv('TAVILY_API_KEY', '').strip()
+    if not api_key or not query:
+        return []
+    payload = {
+        'api_key': api_key,
+        'query': query,
+        'search_depth': 'advanced',
+        'include_answer': False,
+        'include_images': False,
+        'include_raw_content': False,
+        'max_results': max_results
+    }
+    try:
+        resp = requests.post('https://api.tavily.com/search', json=payload, timeout=10)
+        if resp.status_code != 200:
+            return []
+        return resp.json().get('results', [])
+    except Exception:
+        return []
+
+
+def scrape_url(url, max_chars=1200):
+    if not url:
+        return ''
+    headers = {'User-Agent': 'DeakteriChatBot/1.0'}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        content_type = resp.headers.get('Content-Type', '')
+        if resp.status_code != 200 or 'text' not in content_type:
+            return ''
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        for tag in soup(['script', 'style', 'noscript']):
+            tag.extract()
+        text = ' '.join(chunk.strip() for chunk in soup.get_text(separator=' ', strip=True).split())
+        return text[:max_chars]
+    except Exception:
+        return ''
+
+
+def gather_web_context(query, limit=3):
+    results = tavily_search(query, max_results=limit)
+    context = []
+    for item in results:
+        url = item.get('url')
+        content = scrape_url(url)
+        snippet = content or item.get('content') or item.get('snippet') or ''
+        if not snippet:
+            continue
+        context.append({
+            'title': item.get('title') or url,
+            'url': url,
+            'content': snippet[:600]
+        })
+    return context

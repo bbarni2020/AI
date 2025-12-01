@@ -5,7 +5,7 @@ from flask import Blueprint, session, redirect, url_for, request, jsonify, curre
 from authlib.integrations.flask_client import OAuth
 from .models import User, UserKey, Conversation, UsageLog, ProviderKey
 from . import db
-from .utils import generate_api_key, extract_tokens
+from .utils import generate_api_key, extract_tokens, gather_web_context
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
@@ -135,6 +135,20 @@ def get_conversation(conv_id):
         'messages': conv.messages
     })
 
+@chat_bp.route('/api/chat/conversation/<int:conv_id>', methods=['DELETE'])
+def delete_conversation(conv_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    if not conv:
+        return jsonify({'error': 'not found'}), 404
+
+    db.session.delete(conv)
+    db.session.commit()
+    return jsonify({'deleted': True})
+
 @chat_bp.route('/api/chat/models')
 def get_models():
     if 'user_id' not in session:
@@ -215,9 +229,17 @@ def send_message():
     conv_id = data.get('conversation_id')
     requested_model = data.get('model')
     attachments = data.get('attachments', [])
+    use_web_search = bool(data.get('use_web_search'))
+    web_context = []
     
     if not message and not attachments:
         return jsonify({'error': 'message or attachments required'}), 400
+
+    if use_web_search and message:
+        try:
+            web_context = gather_web_context(message)
+        except Exception:
+            web_context = []
         
     if conv_id:
         conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
@@ -260,6 +282,19 @@ def send_message():
     if not final_model or final_model == 'AI':
         final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
 
+    context_message = None
+    if web_context:
+        snippets = []
+        for idx, item in enumerate(web_context, start=1):
+            title = item.get('title') or 'Result'
+            url = item.get('url') or ''
+            content = item.get('content') or ''
+            snippets.append(f"[{idx}] {title} ({url}): {content}")
+        context_message = {
+            'role': 'system',
+            'content': 'Use the following fresh web results to ground your answer. Cite the matching bracket number in your response when relevant.\n' + '\n\n'.join(snippets)
+        }
+
     upstream_messages = []
     for m in messages:
         content = m.get('content')
@@ -273,6 +308,9 @@ def send_message():
             upstream_messages.append({'role': m['role'], 'content': valid_content})
         else:
             upstream_messages.append({'role': m['role'], 'content': content})
+
+    if context_message:
+        upstream_messages.insert(0, context_message)
 
     try:
         resp = requests.post(
@@ -306,6 +344,8 @@ def send_message():
             }
             if response_images:
                 assistant_message_obj['images'] = response_images
+            if web_context:
+                assistant_message_obj['sources'] = web_context
 
             messages.append(assistant_message_obj)
             conv.messages = messages
@@ -328,7 +368,8 @@ def send_message():
                 'message': assistant_msg_content,
                 'images': response_images,
                 'title': conv.title,
-                'model': final_model
+                'model': final_model,
+                'sources': web_context
             })
         else:
             return jsonify({'error': 'Upstream error', 'details': resp.text}), resp.status_code

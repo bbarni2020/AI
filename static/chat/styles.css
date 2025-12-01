@@ -140,6 +140,30 @@ body, html {
     font-weight: 500;
 }
 
+.history-delete-btn {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    padding: 2px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.history-delete-btn:hover {
+    background-color: var(--hover-bg);
+    color: var(--text-color);
+}
+
+.history-empty {
+    padding: 12px 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
 .sidebar-footer {
     padding: 16px;
     border-top: 1px solid var(--border-color);
@@ -272,6 +296,65 @@ body, html {
 }
 .message-content a:hover {
     text-decoration: underline;
+}
+
+.message-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.message-model {
+    font-size: 12px;
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+.message-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.copy-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.copy-btn:hover {
+    color: var(--text-color);
+    border-color: var(--text-color);
+}
+
+.copy-btn.copied {
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.message-sources {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.02);
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.message-sources a {
+    color: var(--primary-color);
 }
 
 
@@ -419,7 +502,10 @@ body, html {
 
 .model-selector-container {
     display: flex;
-    justify-content: flex-start;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
 }
 
 .model-select {
@@ -431,6 +517,21 @@ body, html {
     font-size: 12px;
     outline: none;
     cursor: pointer;
+}
+
+.web-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.web-toggle input {
+    cursor: pointer;
+    accent-color: var(--primary-color);
 }
 
 .input-box-wrapper {
