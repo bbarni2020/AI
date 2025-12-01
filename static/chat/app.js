@@ -167,6 +167,26 @@ function renderModeOptions() {
     }
 }
 
+function escapeHtml(value) {
+    if (value == null) return '';
+    return String(value).replace(/[&<>"']/g, (ch) => {
+        switch (ch) {
+            case '&':
+                return '&amp;';
+            case '<':
+                return '&lt;';
+            case '>':
+                return '&gt;';
+            case '"':
+                return '&quot;';
+            case '\'':
+                return '&#39;';
+            default:
+                return ch;
+        }
+    });
+}
+
 function initModeSwitcher() {
     const buttons = document.querySelectorAll('.mode-toggle-btn');
     buttons.forEach(btn => {
@@ -182,6 +202,7 @@ function initModeSwitcher() {
 
 function applyModeControl(value) {
     modeControl = value === 'manual' ? 'manual' : 'smart';
+    document.body.dataset.modePanel = modeControl;
     document.querySelectorAll('.mode-toggle-btn').forEach(btn => {
         const active = btn.dataset.mode === modeControl;
         btn.classList.toggle('active', active);

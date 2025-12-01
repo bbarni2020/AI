@@ -208,12 +208,20 @@ body, html {
 .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 40px 20px;
-    padding-bottom: 120px;
+    padding: 48px 24px;
+    padding-bottom: 200px;
     display: flex;
     flex-direction: column;
     gap: 24px;
     scroll-behavior: smooth;
+}
+
+body[data-mode-panel="smart"] .chat-messages {
+    padding-bottom: 260px;
+}
+
+body[data-mode-panel="manual"] .chat-messages {
+    padding-bottom: 210px;
 }
 
 .empty-state {
