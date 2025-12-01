@@ -62,7 +62,7 @@ async function loadModels() {
         if (res.ok) {
             const data = await res.json();
             const select = document.getElementById('model-select');
-            select.innerHTML = '<option value="AI">✨ AI (Auto)</option>';
+            select.innerHTML = '<option value="AI">AI (Auto)</option>';
             
             const models = data.models || data.data || [];
             models.forEach(model => {
