@@ -165,15 +165,32 @@ async function loadHistory() {
 
 async function loadConversation(id) {
     currentConversationId = id;
+    
+    const container = document.getElementById('chat-messages');
+    container.innerHTML = '';
+    
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'chat-loading';
+    loadingDiv.innerHTML = `
+        <div class="chat-loading-spinner">
+            <div class="spinner-ring"></div>
+            <div class="spinner-ring"></div>
+            <div class="spinner-ring"></div>
+        </div>
+        <p>Beszélgetés betöltése...</p>
+    `;
+    container.appendChild(loadingDiv);
+    
     const res = await fetch(`/api/chat/conversation/${id}`);
     if (res.ok) {
         const data = await res.json();
-        const container = document.getElementById('chat-messages');
         container.innerHTML = '';
         data.messages.forEach(msg => appendMessage(msg.role, msg.content, msg.images));
         
         document.querySelectorAll('.history-item').forEach(el => el.classList.remove('active'));
         loadHistory(); 
+    } else {
+        container.innerHTML = '<div class="empty-state"><p>Hiba a beszélgetés betöltésekor</p></div>';
     }
 }
 
