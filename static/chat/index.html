@@ -36,6 +36,9 @@
             </div>
         </aside>
         <main class="main-content">
+            <button id="sidebarToggle" class="mobile-menu-btn" aria-label="Open menu">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
             <div id="chat-messages" class="chat-messages">
                 <div class="empty-state">
                     <h1>Szia!</h1>
@@ -86,6 +89,7 @@
                 </div>
             </div>
         </main>
+        <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
     </div>
     <script src="/static/chat/app.js"></script>
 </body>

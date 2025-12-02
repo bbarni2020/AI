@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadModels();
     renderModeOptions();
     initModeSwitcher();
+    initMobileSidebar();
     
     const input = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
@@ -61,6 +62,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     fileInput.addEventListener('change', handleFileSelect);
 });
+
+function initMobileSidebar() {
+    const toggle = document.getElementById('sidebarToggle');
+    const sidebar = document.querySelector('.sidebar');
+    const backdrop = document.getElementById('sidebarBackdrop');
+    if (!toggle || !sidebar || !backdrop) return;
+
+    const openSidebar = () => {
+        sidebar.classList.add('open');
+        backdrop.classList.add('visible');
+        backdrop.setAttribute('aria-hidden', 'false');
+    };
+    const closeSidebar = () => {
+        sidebar.classList.remove('open');
+        backdrop.classList.remove('visible');
+        backdrop.setAttribute('aria-hidden', 'true');
+    };
+
+    toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (sidebar.classList.contains('open')) closeSidebar(); else openSidebar();
+    });
+
+    backdrop.addEventListener('click', closeSidebar);
+
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 768) {
+            closeSidebar();
+        }
+    });
+}
 
 function updateSendButton() {
     const input = document.getElementById('message-input');
@@ -470,7 +502,7 @@ async function sendMessage() {
     appendMessage('user', text, attachments, null, null, null);
 
     const loadingId = 'loading-' + Date.now();
-    appendLoading(loadingId);
+    appendLoading(loadingId, useWebSearch);
 
     try {
         const res = await fetch('/api/chat/message', {
@@ -513,7 +545,7 @@ async function sendMessage() {
     }
 }
 
-function appendLoading(id) {
+function appendLoading(id, isWebSearching = false) {
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = 'message assistant';
@@ -521,7 +553,9 @@ function appendLoading(id) {
     
     const content = document.createElement('div');
     content.className = 'message-content';
+    const statusText = isWebSearching ? '<span class="loading-status">Keresés a weben...</span>' : '';
     content.innerHTML = `
+        ${statusText}
         <div class="typing-indicator">
             <div class="typing-dot"></div>
             <div class="typing-dot"></div>
@@ -622,10 +656,11 @@ function appendMessage(role, text, images, sources, modelName, meta) {
     if (sources && sources.length) {
         const sourcesDiv = document.createElement('div');
         sourcesDiv.className = 'message-sources';
-        sourcesDiv.innerHTML = sources.map((src, idx) => {
+        const sourcesHeader = '<div class="sources-header"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Web források</div>';
+        sourcesDiv.innerHTML = sourcesHeader + sources.map((src, idx) => {
             const title = src.title || src.url || `Forrás ${idx + 1}`;
             const href = src.url || '#';
-            return `<div>[${idx + 1}] <a href="${href}" target="_blank" rel="noopener">${title}</a></div>`;
+            return `<div class="source-item">[${idx + 1}] <a href="${href}" target="_blank" rel="noopener">${title}</a></div>`;
         }).join('');
         content.appendChild(sourcesDiv);
     }
