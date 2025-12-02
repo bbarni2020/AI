@@ -2,6 +2,7 @@ import os
 import json
 import unicodedata
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Blueprint, session, redirect, url_for, request, jsonify, current_app
 from authlib.integrations.flask_client import OAuth
 from .models import User, UserKey, Conversation, UsageLog, ProviderKey
@@ -33,9 +34,10 @@ DEFAULT_PRECISE_MODEL = os.getenv('PRECISE_MODEL', 'openai/gpt-5.1')
 DEFAULT_TURBO_MODEL = os.getenv('TURBO_MODEL', 'google/gemini-3-pro-preview')
 DEFAULT_ULTIMATE_MODELS = [
     os.getenv('ULTIMATE_MODEL_A', 'openai/gpt-5.1'),
-    os.getenv('ULTIMATE_MODEL_B', 'google/gemini-3-pro-preview')
+    os.getenv('ULTIMATE_MODEL_B', 'google/gemini-3-pro-preview'),
+    os.getenv('ULTIMATE_MODEL_C', 'deepseek/deepseek-v3.2-exp')
 ]
-DEFAULT_ULTIMATE_FUSION_MODEL = os.getenv('ULTIMATE_FUSION_MODEL', 'openai/gpt-5.1')
+DEFAULT_ULTIMATE_FUSION_MODEL = os.getenv('ULTIMATE_FUSION_MODEL', 'moonshotai/kimi-k2-thinking')
 
 def normalize_mode(value):
     if not value:
@@ -113,20 +115,24 @@ def run_ultimate_ensemble(upstream_messages, history_messages, upstream_key, ups
     fusion_model = resolve_fusion_model()
     results = []
     usage = {'prompt': 0, 'response': 0, 'total': 0}
-    for model_name in models:
-        try:
-            content, images, data = execute_completion(model_name, upstream_messages, upstream_key, upstream_url)
-            results.append({
-                'model': model_name,
-                'content': content or '',
-                'images': images
-            })
-            pt, rt, tt = extract_tokens(data)
-            usage['prompt'] += pt
-            usage['response'] += rt
-            usage['total'] += tt
-        except UpstreamError as exc:
-            current_app.logger.warning('Ultimate candidate failed (%s): %s', model_name, exc)
+
+    def call_model(model_name):
+        content, images, data = execute_completion(model_name, upstream_messages, upstream_key, upstream_url)
+        return model_name, content, images, data
+
+    with ThreadPoolExecutor(max_workers=len(models)) as executor:
+        futures = {executor.submit(call_model, m): m for m in models}
+        for future in as_completed(futures):
+            model_name = futures[future]
+            try:
+                name, content, images, data = future.result()
+                results.append({'model': name, 'content': content or '', 'images': images})
+                pt, rt, tt = extract_tokens(data)
+                usage['prompt'] += pt
+                usage['response'] += rt
+                usage['total'] += tt
+            except Exception as exc:
+                current_app.logger.warning('Ultimate candidate failed (%s): %s', model_name, exc)
     if not results:
         raise UpstreamError('All ultimate candidate models failed', 502)
     if len(results) == 1:
