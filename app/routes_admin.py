@@ -1,5 +1,7 @@
 import os
 import secrets
+import requests
+import json
 from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, session, current_app
 from sqlalchemy import func, cast, Date
@@ -21,7 +23,9 @@ def admin_login():
     data = request.get_json(silent=True) or {}
     u = data.get('username')
     p = data.get('password')
-    if u == os.getenv('ADMIN_USER', 'admin') and p == os.getenv('ADMIN_PASS', 'admin'):
+    admin_user = os.getenv('ADMIN_USER')
+    admin_pass = os.getenv('ADMIN_PASS')
+    if admin_user and admin_pass and u == admin_user and p == admin_pass:
         session['admin'] = u
         return jsonify({'ok': True})
     return jsonify({'ok': False}), 401
@@ -35,15 +39,75 @@ def admin_logout():
 def admin_me():
     return jsonify({'authenticated': 'admin' in session})
 
+def _get_upstream_provider():
+    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
+    if upstream_key_env:
+        return upstream_key_env, 1
+    
+    provider = ProviderKey.query.filter_by(enabled=True).first()
+    if not provider:
+        return None, None
+    
+    return provider.api_key, provider.id
+
+def _make_upstream_request(url_path, payload, user_key):
+    upstream_key, provider_id = _get_upstream_provider()
+    if not upstream_key:
+        return jsonify({'error': 'No upstream provider configured'}), 500
+
+    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + url_path
+
+    try:
+        resp = requests.post(
+            upstream_url,
+            headers={
+                'Authorization': f'Bearer {upstream_key}',
+                'Content-Type': 'application/json'
+            },
+            data=json.dumps(payload),
+            timeout=120
+        )
+
+        if resp.status_code == 200:
+            response_data = resp.json()
+            from .utils import extract_tokens
+            pt, rt, tt = extract_tokens(response_data)
+            ul = UsageLog(
+                provider_key_id=provider_id,
+                user_key_id=user_key.id,
+                request_tokens=pt,
+                response_tokens=rt,
+                total_tokens=tt
+            )
+            db.session.add(ul)
+            user_key.last_used_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify(response_data)
+        else:
+            return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
+            
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': str(e)}), 502
+
 @admin_bp.get('/user-keys')
 def list_user_keys():
     if 'admin' not in session:
         return jsonify({'error': 'unauthorized'}), 401
-    rows = UserKey.query.order_by(UserKey.id.desc()).all()
+
+    usage_stats = db.session.query(
+        UsageLog.user_key_id,
+        func.count(UsageLog.id).label('total_requests'),
+        func.coalesce(func.sum(UsageLog.total_tokens), 0).label('total_tokens')
+    ).group_by(UsageLog.user_key_id).subquery()
+
+    rows = db.session.query(
+        UserKey,
+        usage_stats.c.total_requests,
+        usage_stats.c.total_tokens
+    ).outerjoin(usage_stats, UserKey.id == usage_stats.c.user_key_id).order_by(UserKey.id.desc()).all()
+
     result = []
-    for r in rows:
-        total_requests = db.session.query(func.count(UsageLog.id)).filter(UsageLog.user_key_id == r.id).scalar() or 0
-        total_tokens = db.session.query(func.coalesce(func.sum(UsageLog.total_tokens), 0)).filter(UsageLog.user_key_id == r.id).scalar() or 0
+    for r, total_requests, total_tokens in rows:
         result.append({
             'id': r.id,
             'name': r.name,
@@ -59,8 +123,8 @@ def list_user_keys():
             'token_limit_per_day': r.token_limit_per_day,
             'created_at': r.created_at.isoformat(),
             'last_used_at': r.last_used_at.isoformat() if r.last_used_at else None,
-            'total_requests': total_requests,
-            'total_tokens': total_tokens,
+            'total_requests': total_requests or 0,
+            'total_tokens': int(total_tokens or 0),
         })
     return jsonify(result)
 
@@ -251,60 +315,12 @@ def playground_chat():
     if not user_key:
         return jsonify({'error': 'Key not found'}), 404
     
-    import requests
-    import json
-    from datetime import datetime, timedelta
-    from sqlalchemy import func
-    from .models import UsageLog, ProviderKey
-    from .utils import extract_tokens
+    payload = {
+        'model': model,
+        'messages': messages
+    }
     
-    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
-    if upstream_key_env:
-        upstream_key = upstream_key_env
-        provider_id = 1
-    else:
-        provider = ProviderKey.query.filter_by(enabled=True).first()
-        if not provider:
-            return jsonify({'error': 'No upstream provider configured'}), 500
-        upstream_key = provider.api_key
-        provider_id = provider.id
-    
-    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
-    
-    try:
-        resp = requests.post(
-            upstream_url,
-            headers={
-                'Authorization': f'Bearer {upstream_key}',
-                'Content-Type': 'application/json'
-            },
-            data=json.dumps({
-                'model': model,
-                'messages': messages
-            }),
-            timeout=120
-        )
-        
-        if resp.status_code == 200:
-            response_data = resp.json()
-            pt, rt, tt = extract_tokens(response_data)
-            ul = UsageLog(
-                provider_key_id=provider_id,
-                user_key_id=user_key.id,
-                request_tokens=pt,
-                response_tokens=rt,
-                total_tokens=tt
-            )
-            db.session.add(ul)
-            user_key.last_used_at = datetime.utcnow()
-            db.session.commit()
-            
-            return jsonify(response_data)
-        else:
-            return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 502
+    return _make_upstream_request('/chat/completions', payload, user_key)
 
 
 @admin_bp.post('/playground/embeddings')
@@ -325,58 +341,12 @@ def playground_embeddings():
     if not user_key:
         return jsonify({'error': 'Key not found'}), 404
 
-    import requests
-    import json
-    from datetime import datetime
-    from .models import UsageLog, ProviderKey
-    from .utils import extract_tokens
+    payload = {
+        'model': model,
+        'input': text
+    }
 
-    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
-    if upstream_key_env:
-        upstream_key = upstream_key_env
-        provider_id = 1
-    else:
-        provider = ProviderKey.query.filter_by(enabled=True).first()
-        if not provider:
-            return jsonify({'error': 'No upstream provider configured'}), 500
-        upstream_key = provider.api_key
-        provider_id = provider.id
-
-    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/embeddings'
-
-    try:
-        resp = requests.post(
-            upstream_url,
-            headers={
-                'Authorization': f'Bearer {upstream_key}',
-                'Content-Type': 'application/json'
-            },
-            data=json.dumps({
-                'model': model,
-                'input': text
-            }),
-            timeout=120
-        )
-
-        if resp.status_code == 200:
-            response_data = resp.json()
-            pt, rt, tt = extract_tokens(response_data)
-            ul = UsageLog(
-                provider_key_id=provider_id,
-                user_key_id=user_key.id,
-                request_tokens=pt,
-                response_tokens=rt,
-                total_tokens=tt
-            )
-            db.session.add(ul)
-            user_key.last_used_at = datetime.utcnow()
-            db.session.commit()
-            return jsonify(response_data)
-        else:
-            return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 502
+    return _make_upstream_request('/embeddings', payload, user_key)
 
 
 @admin_bp.post('/playground/fetch_md')
@@ -389,7 +359,6 @@ def playground_fetch_md():
     if not url:
         return jsonify({'error': 'url is required'}), 400
 
-    import requests
     try:
         r = requests.get(url, timeout=10)
         if r.status_code != 200:
@@ -500,18 +469,9 @@ def generate_agent_md():
     if not messages:
         return jsonify({'error': 'messages required'}), 400
 
-    import requests
-    import json
-    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
-    if upstream_key_env:
-        upstream_key = upstream_key_env
-        provider_id = 1
-    else:
-        provider = ProviderKey.query.filter_by(enabled=True).first()
-        if not provider:
-            return jsonify({'error': 'No upstream provider configured'}), 500
-        upstream_key = provider.api_key
-        provider_id = provider.id
+    upstream_key, _ = _get_upstream_provider()
+    if not upstream_key:
+        return jsonify({'error': 'No upstream provider configured'}), 500
 
     upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
 
@@ -541,7 +501,7 @@ def generate_agent_md():
         content = ''
         try:
             content = response_data.get('choices', [])[0].get('message', {}).get('content', '')
-        except Exception:
+        except IndexError:
             content = ''
 
         safe = ''.join([c for c in agent if c.isalnum() or c in ('-', '_')])
@@ -552,7 +512,7 @@ def generate_agent_md():
             fh.write(content)
 
         return jsonify({'content': content})
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         return jsonify({'error': str(e)}), 502
 
 
@@ -587,50 +547,12 @@ def agent_chat(agent):
     if not user_key:
         return jsonify({'error': 'Key not found'}), 404
 
-    import requests
-    import json
-    from .models import UsageLog, ProviderKey
-    from .utils import extract_tokens
+    payload = {
+        'model': model,
+        'messages': msgs
+    }
 
-    upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')
-    if upstream_key_env:
-        upstream_key = upstream_key_env
-        provider_id = 1
-    else:
-        provider = ProviderKey.query.filter_by(enabled=True).first()
-        if not provider:
-            return jsonify({'error': 'No upstream provider configured'}), 500
-        upstream_key = provider.api_key
-        provider_id = provider.id
-
-    upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/') + '/chat/completions'
-
-    try:
-        resp = requests.post(
-            upstream_url,
-            headers={'Authorization': f'Bearer {upstream_key}', 'Content-Type': 'application/json'},
-            data=json.dumps({'model': model, 'messages': msgs}),
-            timeout=120
-        )
-
-        if resp.status_code == 200:
-            response_data = resp.json()
-            pt, rt, tt = extract_tokens(response_data)
-            ul = UsageLog(
-                provider_key_id=provider_id,
-                user_key_id=user_key.id,
-                request_tokens=pt,
-                response_tokens=rt,
-                total_tokens=tt
-            )
-            db.session.add(ul)
-            user_key.last_used_at = datetime.utcnow()
-            db.session.commit()
-            return jsonify(response_data)
-        else:
-            return jsonify({'error': 'Upstream request failed', 'status': resp.status_code}), resp.status_code
-    except Exception as e:
-        return jsonify({'error': str(e)}), 502
+    return _make_upstream_request('/chat/completions', payload, user_key)
 
 @admin_bp.get('/users')
 def list_users():
