@@ -708,6 +708,26 @@ const CorsSettings = {
   }
 };
 
+const Whitelist = {
+  async loadSettings() {
+    const result = await API.request('/admin/whitelist');
+    if (result.status === 200 && result.data) {
+      document.getElementById('whitelist_emails').value = result.data.whitelisted_emails || '';
+      document.getElementById('whitelist_domains').value = result.data.whitelisted_domains || '';
+    }
+  },
+
+  async saveSettings(event) {
+    event.preventDefault();
+    const settings = {
+      whitelisted_emails: document.getElementById('whitelist_emails').value.trim(),
+      whitelisted_domains: document.getElementById('whitelist_domains').value.trim()
+    };
+    await API.request('/admin/whitelist', 'PUT', settings);
+    UI.showToast('Whitelist settings saved', 'success');
+  }
+};
+
 const Playground = {
   messages: [],
   selectedKey: null,
@@ -1915,6 +1935,8 @@ const Navigation = {
         AgentBuilder.init();
       } else if (sectionId === 'users') {
         Users.loadUsers();
+      } else if (sectionId === 'whitelist') {
+        Whitelist.loadSettings();
       }
     }
   }
@@ -1934,6 +1956,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   
   document.getElementById('corsForm').onsubmit = (e) => CorsSettings.saveSettings(e);
+  
+  document.getElementById('whitelistForm').onsubmit = (e) => Whitelist.saveSettings(e);
   
   document.getElementById('addOriginBtn').onclick = () => {
     const input = document.getElementById('newOriginInput');

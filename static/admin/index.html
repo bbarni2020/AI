@@ -89,6 +89,13 @@ Agent Builder
 </svg>
 CORS Settings
 </a>
+<a href="#whitelist" class="nav-item">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+<polyline points="22 4 12 14.01 9 11.01"/>
+</svg>
+Email Whitelist
+</a>
 </nav>
 <div class="sidebar-footer">
 <button class="theme-toggle" id="themeToggle">
@@ -618,6 +625,62 @@ Add Origin
 <code>Origins: https://app.example.com</code><br>
 <code>Allow Credentials: Enabled</code>
 <p>Allows cookies and auth headers. Origins cannot be *.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="whitelist" class="section">
+<div class="page-header">
+<h2>Email Whitelist</h2>
+<p class="subtitle">Manage allowed emails and domains for user registration</p>
+</div>
+
+<div class="card form-card">
+<div class="card-header">
+<h3>Whitelist Configuration</h3>
+</div>
+<div class="card-content">
+<form id="whitelistForm" class="key-form">
+<div class="form-group">
+<label for="whitelist_emails">Whitelisted Emails</label>
+<textarea id="whitelist_emails" rows="5" placeholder="user@example.com&#10;another@domain.com"></textarea>
+<small class="form-help">One email per line. Users with these exact emails can register.</small>
+</div>
+<div class="form-group">
+<label for="whitelist_domains">Whitelisted Domains</label>
+<textarea id="whitelist_domains" rows="5" placeholder="@example.com&#10;@company.org"></textarea>
+<small class="form-help">One domain per line (include @). Any email ending with these domains can register.</small>
+</div>
+<div class="form-actions">
+<button type="submit" class="btn-primary">Save Whitelist</button>
+</div>
+</form>
+</div>
+</div>
+
+<div class="card">
+<div class="card-header">
+<h3>Whitelist Info</h3>
+</div>
+<div class="card-content">
+<div class="info-section">
+<h4>How it works</h4>
+<p>Users can only register if their email matches a whitelisted email OR if their email ends with a whitelisted domain.</p>
+<p>Leave both fields empty to allow anyone to register (not recommended for production).</p>
+</div>
+<div class="info-section">
+<h4>Examples</h4>
+<div class="config-examples">
+<div class="config-example">
+<strong>Allow specific users</strong>
+<code>alice@gmail.com<br>bob@outlook.com</code>
+</div>
+<div class="config-example">
+<strong>Allow entire company</strong>
+<code>@company.com<br>@subsidiary.com</code>
 </div>
 </div>
 </div>

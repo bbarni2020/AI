@@ -48,6 +48,13 @@ class CorsSettings(db.Model):
     max_age = db.Column(db.Integer, default=3600, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 
+class EmailWhitelist(db.Model):
+    __tablename__ = 'email_whitelist'
+    id = db.Column(db.Integer, primary_key=True)
+    whitelisted_emails = db.Column(db.Text, default='', nullable=False)
+    whitelisted_domains = db.Column(db.Text, default='', nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -58,6 +65,8 @@ class User(db.Model):
     user_key_id = db.Column(db.Integer, db.ForeignKey('user_keys.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
     ultimate_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    web_search_count = db.Column(db.Integer, default=0, nullable=False)
+    web_search_reset = db.Column(db.DateTime, nullable=True)
     
     user_key = db.relationship('UserKey', backref='user', uselist=False)
 

@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, session, current_app
 from sqlalchemy import func, cast, Date
-from .models import ProviderKey, UserKey, UsageLog, CorsSettings, User
+from .models import ProviderKey, UserKey, UsageLog, CorsSettings, User, EmailWhitelist
 from . import db
 from .utils import mask_key
 
@@ -666,3 +666,34 @@ def update_user_ultimate(uid):
     db.session.commit()
     return jsonify({'ultimate_enabled': user.ultimate_enabled})
 
+@admin_bp.get('/whitelist')
+def get_whitelist():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    whitelist = EmailWhitelist.query.first()
+    if not whitelist:
+        whitelist = EmailWhitelist()
+        db.session.add(whitelist)
+        db.session.commit()
+    return jsonify({
+        'id': whitelist.id,
+        'whitelisted_emails': whitelist.whitelisted_emails,
+        'whitelisted_domains': whitelist.whitelisted_domains,
+        'updated_at': whitelist.updated_at.isoformat() if whitelist.updated_at else None
+    })
+
+@admin_bp.put('/whitelist')
+def update_whitelist():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    whitelist = EmailWhitelist.query.first()
+    if not whitelist:
+        whitelist = EmailWhitelist()
+        db.session.add(whitelist)
+    data = request.get_json(silent=True) or {}
+    if 'whitelisted_emails' in data:
+        whitelist.whitelisted_emails = data['whitelisted_emails'].strip()
+    if 'whitelisted_domains' in data:
+        whitelist.whitelisted_domains = data['whitelisted_domains'].strip()
+    db.session.commit()
+    return jsonify({'ok': True})

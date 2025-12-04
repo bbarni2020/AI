@@ -5,11 +5,14 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Blueprint, session, redirect, url_for, request, jsonify, current_app
 from authlib.integrations.flask_client import OAuth
-from .models import User, UserKey, Conversation, UsageLog, ProviderKey
+from .models import User, UserKey, Conversation, UsageLog, ProviderKey, EmailWhitelist
 from . import db
 from .utils import generate_api_key, extract_tokens, gather_web_context
 from datetime import datetime, timedelta
 from sqlalchemy import func
+
+WEB_SEARCH_LIMIT_NORMAL = 25
+WEB_SEARCH_LIMIT_ULTIMATE = 65
 
 chat_bp = Blueprint('chat', __name__)
 oauth = OAuth()
@@ -214,6 +217,26 @@ def login():
         return redirect(url_for('chat.index'))
     return current_app.send_static_file('chat/login.html')
 
+def check_email_allowed(email):
+    if not email:
+        return False
+    whitelist = EmailWhitelist.query.first()
+    if not whitelist:
+        return True
+    emails_raw = whitelist.whitelisted_emails or ''
+    domains_raw = whitelist.whitelisted_domains or ''
+    if not emails_raw.strip() and not domains_raw.strip():
+        return True
+    allowed_emails = [e.strip().lower() for e in emails_raw.split('\n') if e.strip()]
+    allowed_domains = [d.strip().lower() for d in domains_raw.split('\n') if d.strip()]
+    email_lower = email.lower()
+    if email_lower in allowed_emails:
+        return True
+    for domain in allowed_domains:
+        if email_lower.endswith(domain):
+            return True
+    return False
+
 @chat_bp.route('/auth/callback')
 def auth_callback():
     try:
@@ -223,7 +246,7 @@ def auth_callback():
             user_info = oauth.google.userinfo()
         
         email = user_info.get('email')
-        if not email or not email.endswith('@deakteri.hu'):
+        if not email or not check_email_allowed(email):
             return current_app.send_static_file('chat/denied.html')
         
         user = User.query.filter_by(email=email).first()
@@ -417,8 +440,23 @@ def send_message():
         return jsonify({'error': 'message or attachments required'}), 400
 
     if use_web_search and message:
+        now = datetime.utcnow()
+        if user.web_search_reset is None or user.web_search_reset <= now:
+            first_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if now.month == 12:
+                next_month = first_of_month.replace(year=now.year + 1, month=1)
+            else:
+                next_month = first_of_month.replace(month=now.month + 1)
+            user.web_search_reset = next_month
+            user.web_search_count = 0
+            db.session.commit()
+        limit = WEB_SEARCH_LIMIT_ULTIMATE if user.ultimate_enabled else WEB_SEARCH_LIMIT_NORMAL
+        if user.web_search_count >= limit:
+            return jsonify({'error': 'web_search_limit_exceeded', 'limit': limit}), 429
         try:
             web_context = gather_web_context(message)
+            user.web_search_count += 1
+            db.session.commit()
         except Exception:
             web_context = []
         
