@@ -54,23 +54,23 @@ def extract_tokens(data):
 
 
 def tavily_search(query, max_results=3):
-    api_key = os.getenv('TAVILY_API_KEY', '').strip()
+    api_key = os.getenv('SEARCH_API_KEY', '').strip()
     if not api_key or not query:
         return []
-    payload = {
-        'api_key': api_key,
-        'query': query,
-        'search_depth': 'advanced',
-        'include_answer': False,
-        'include_images': False,
-        'include_raw_content': False,
-        'max_results': max_results
+    params = {
+        'q': query,
+        'count': min(max_results, 20)
+    }
+    headers = {
+        'Authorization': f'Bearer {api_key}'
     }
     try:
-        resp = requests.post('https://api.tavily.com/search', json=payload, timeout=10)
+        resp = requests.get('https://search.hackclub.com/res/v1/web/search', params=params, headers=headers, timeout=10)
         if resp.status_code != 200:
             return []
-        return resp.json().get('results', [])
+        data = resp.json()
+        web_results = data.get('web', {}).get('results', [])
+        return [{'url': r.get('url'), 'title': r.get('title'), 'content': r.get('description')} for r in web_results]
     except Exception:
         return []
 

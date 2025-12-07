@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search</title>
+    <link rel="stylesheet" href="/static/search/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Search</h1>
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search the web..." autocomplete="off">
+                <button id="searchBtn">Search</button>
+            </div>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab active" data-type="web">Web</button>
+            <button class="tab" data-type="images">Images</button>
+            <button class="tab" data-type="videos">Videos</button>
+            <button class="tab" data-type="news">News</button>
+        </nav>
+
+        <div class="filters" id="filters">
+            <select id="freshnessFilter" style="display:none;">
+                <option value="">Any time</option>
+                <option value="pd">Past 24 hours</option>
+                <option value="pw">Past week</option>
+                <option value="pm">Past month</option>
+                <option value="py">Past year</option>
+            </select>
+        </div>
+
+        <div id="loading" style="display:none;">
+            <div class="spinner"></div>
+            <p>Searching...</p>
+        </div>
+
+        <div id="error" style="display:none;"></div>
+
+        <div id="results"></div>
+    </div>
+
+    <script src="/static/search/app.js"></script>
+</body>
+</html>

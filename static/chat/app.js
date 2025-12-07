@@ -691,11 +691,8 @@ async function sendMessage() {
                                     renderMathInElement(content, {
                                         delimiters: [
                                             {left: '$$', right: '$$', display: true},
-                                            {left: '$', right: '$', display: false},
                                             {left: '\\[', right: '\\]', display: true},
-                                            {left: '\\(', right: '\\)', display: false},
-                                            {left: '[', right: ']', display: true},
-                                            {left: '(', right: ')', display: false}
+                                            {left: '\\(', right: '\\)', display: false}
                                         ],
                                         throwOnError: false
                                     });
@@ -853,11 +850,8 @@ function appendMessage(role, text, images, sources, modelName, meta) {
         renderMathInElement(content, {
             delimiters: [
                 {left: '$$', right: '$$', display: true},
-                {left: '$', right: '$', display: false},
                 {left: '\\[', right: '\\]', display: true},
-                {left: '\\(', right: '\\)', display: false},
-                {left: '[', right: ']', display: true},
-                {left: '(', right: ')', display: false}
+                {left: '\\(', right: '\\)', display: false}
             ],
             throwOnError: false
         });

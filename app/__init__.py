@@ -52,12 +52,14 @@ def create_app():
     from .routes_admin import admin_bp
     from .routes_proxy import api_bp
     from .routes_chat import chat_bp, init_oauth
+    from .routes_search import search_bp
     
     init_oauth(app)
     
     app.register_blueprint(admin_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(chat_bp)
+    app.register_blueprint(search_bp)
 
     @app.route('/')
     def root():
