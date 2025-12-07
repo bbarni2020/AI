@@ -537,7 +537,8 @@ async function sendMessage() {
     appendMessage('user', text, attachments, null, null, null);
 
     const mode = modeControl === 'manual' ? 'manual' : selectedMode;
-    const useStream = mode !== 'ultimate';
+    const isImageModel = model && (model.includes('image') || model.includes('dall-e'));
+    const useStream = mode !== 'ultimate' && !isImageModel;
 
     if (!useStream) {
         const loadingId = 'loading-' + Date.now();
@@ -635,6 +636,7 @@ async function sendMessage() {
             const decoder = new TextDecoder();
             let accumulated = '';
             let streamData = {};
+            let streamImages = [];
             let lastWordCount = 0;
 
             while (true) {
@@ -655,6 +657,9 @@ async function sendMessage() {
                                     streamData = data.data;
                                     if (!currentConversationId) {
                                         currentConversationId = streamData.conversation_id;
+                                    }
+                                    if (streamData.images && streamData.images.length > 0) {
+                                        streamImages = streamData.images;
                                     }
                                 } else if (data.type === 'content') {
                                     accumulated += data.content;
@@ -682,6 +687,10 @@ async function sendMessage() {
                                         lastWordCount = currentWordCount;
                                         scrollToBottom();
                                     }
+                                } else if (data.type === 'images') {
+                                    if (data.images && data.images.length > 0) {
+                                        streamImages = data.images;
+                                    }
                                 } else if (data.type === 'done') {
                                     const htmlContent = marked.parse(accumulated);
                                     content.innerHTML = htmlContent;
@@ -696,6 +705,29 @@ async function sendMessage() {
                                         ],
                                         throwOnError: false
                                     });
+
+                                    if (streamImages && streamImages.length > 0) {
+                                        let imgsHtml = '<div class="message-images">';
+                                        streamImages.forEach(img => {
+                                            let url = img;
+                                            if (typeof img === 'object') {
+                                                url = img.url || img.image_url || '';
+                                                if (typeof url === 'object') url = url.url;
+                                            }
+                                            
+                                            if (url) {
+                                                const filename = 'image.png';
+                                                imgsHtml += `
+                                                    <a class="img-link" href="${url}" target="_blank" download="${filename}">
+                                                        <img src="${url}" alt="Generated Image">
+                                                        <span class="img-download">⬇</span>
+                                                    </a>
+                                                `;
+                                            }
+                                        });
+                                        imgsHtml += '</div>';
+                                        content.innerHTML += imgsHtml;
+                                    }
 
                                     if (streamData.sources && streamData.sources.length) {
                                         const sourcesDiv = document.createElement('div');

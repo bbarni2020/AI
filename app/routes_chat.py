@@ -706,11 +706,13 @@ def send_message():
                 'title': conv.title,
                 'sources': web_context,
                 'meta': meta,
-                'mode': mode
+                'mode': mode,
+                'images': []
             }
             yield f"data: {json.dumps({'type': 'start', 'data': initial_data})}\n\n"
             
             accumulated_content = ''
+            response_images = []
             usage_prompt = 0
             usage_response = 0
             usage_total = 0
@@ -725,11 +727,17 @@ def send_message():
                         try:
                             chunk = json.loads(chunk_data)
                             if 'choices' in chunk and len(chunk['choices']) > 0:
-                                delta = chunk['choices'][0].get('delta', {})
+                                choice = chunk['choices'][0]
+                                delta = choice.get('delta', {})
                                 content = delta.get('content', '')
                                 if content:
                                     accumulated_content += content
                                     yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
+                                
+                                if 'images' in choice and isinstance(choice['images'], list):
+                                    response_images.extend(choice['images'])
+                                elif 'image_url' in choice:
+                                    response_images.append(choice['image_url'])
                             
                             if 'usage' in chunk:
                                 usage_prompt = chunk['usage'].get('prompt_tokens', 0)
@@ -743,6 +751,9 @@ def send_message():
                 'content': accumulated_content,
                 'model': final_model
             }
+            if response_images:
+                assistant_message_obj['images'] = response_images
+                yield f"data: {json.dumps({'type': 'images', 'images': response_images})}\n\n"
             if web_context:
                 assistant_message_obj['sources'] = web_context
             if meta:
