@@ -44,6 +44,15 @@ def create_app():
         if 'ultimate_enabled' not in user_columns:
             db.session.execute(text('ALTER TABLE users ADD COLUMN ultimate_enabled BOOLEAN NOT NULL DEFAULT 0'))
             db.session.commit()
+        
+        usage_columns = {c['name'] for c in inspector.get_columns('usage_logs')}
+        if 'model' not in usage_columns:
+            db.session.execute(text('ALTER TABLE usage_logs ADD COLUMN model VARCHAR(256)'))
+            db.session.commit()
+        if 'cost' not in usage_columns:
+            db.session.execute(text('ALTER TABLE usage_logs ADD COLUMN cost FLOAT NOT NULL DEFAULT 0.0'))
+            db.session.commit()
+        
         if not CorsSettings.query.first():
             default_cors = CorsSettings()
             db.session.add(default_cors)

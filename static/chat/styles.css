@@ -44,6 +44,78 @@ body, html {
     display: flex;
     height: 100vh;
     width: 100vw;
+    position: relative;
+}
+
+.app-container.drag-over::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px dashed rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+#drag-drop-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+#drag-drop-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.drag-drop-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    text-align: center;
+}
+
+.drag-drop-content svg {
+    width: 80px;
+    height: 80px;
+    color: #ffffff;
+    stroke-width: 1.5;
+    animation: dragDropPulse 2s ease-in-out infinite;
+}
+
+.drag-drop-content h2 {
+    margin: 0;
+    font-size: 32px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.5px;
+}
+
+.drag-drop-content p {
+    margin: 0;
+    font-size: 16px;
+    color: #a0a0a0;
+}
+
+@keyframes dragDropPulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
 }
 
 .sidebar {

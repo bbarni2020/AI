@@ -1937,6 +1937,10 @@ const Navigation = {
         Users.loadUsers();
       } else if (sectionId === 'whitelist') {
         Whitelist.loadSettings();
+      } else if (sectionId === 'database') {
+        DatabaseManager.loadTable('users');
+      } else if (sectionId === 'spending') {
+        SpendingManager.init();
       }
     }
   }
@@ -2064,6 +2068,32 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.onclick = (e) => AgentBuilder.useExample(e.target.closest('.ai-builder-example-card').querySelector('p').textContent);
   });
   
+  const dbTabBtns = document.querySelectorAll('.db-tab-btn');
+  dbTabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      dbTabBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const table = btn.dataset.table;
+      DatabaseManager.loadTable(table);
+    });
+  });
+
+  document.getElementById('dbAddBtn').addEventListener('click', () => {
+    DatabaseManager.openForm(null);
+  });
+
+  const modalClose = document.querySelector('#dbFormModal .modal-close');
+  if (modalClose) {
+    modalClose.addEventListener('click', () => {
+      document.getElementById('dbFormModal').classList.remove('active');
+    });
+  }
+
+  document.getElementById('dbForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    DatabaseManager.saveRecord();
+  });
+  
   Navigation.init();
   Auth.checkAuth();
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
@@ -2073,3 +2103,327 @@ document.addEventListener('DOMContentLoaded', () => {
     
   });
 });
+
+const DatabaseManager = {
+  currentTable: 'users',
+  currentRecord: null,
+  tableSchemas: {
+    users: [
+      { name: 'id', type: 'number', editable: false },
+      { name: 'email', type: 'email', required: true },
+      { name: 'name', type: 'text' },
+      { name: 'user_key_id', type: 'number', required: true },
+      { name: 'ultimate_enabled', type: 'checkbox' },
+      { name: 'web_search_count', type: 'number' }
+    ]
+  },
+
+  async loadTable(table) {
+    this.currentTable = table;
+    const tableTitle = {
+      'users': 'Users'
+    }[table] || table;
+    
+    document.getElementById('dbTableTitle').textContent = tableTitle;
+    
+    const result = await API.request(`/admin/db/${table}`);
+    if (result.status === 200) {
+      this.renderTable(result.data || []);
+    } else {
+      UI.showToast('Failed to load table data', 'error');
+    }
+  },
+
+  renderTable(records) {
+    const schema = this.tableSchemas[this.currentTable] || [];
+    const head = document.getElementById('dbTableHead');
+    const body = document.getElementById('dbTableBody');
+    
+    head.innerHTML = '';
+    body.innerHTML = '';
+    
+    schema.forEach(col => {
+      const th = document.createElement('th');
+      th.textContent = col.name;
+      head.appendChild(th);
+    });
+    
+    const th = document.createElement('th');
+    th.textContent = 'Actions';
+    head.appendChild(th);
+    
+    records.forEach(record => {
+      const tr = document.createElement('tr');
+      
+      schema.forEach(col => {
+        const td = document.createElement('td');
+        const value = record[col.name];
+        
+        if (col.type === 'checkbox') {
+          td.textContent = value ? 'Yes' : 'No';
+        } else if (col.name === 'message_count') {
+          td.textContent = value || 0;
+        } else {
+          td.textContent = value || '-';
+        }
+        tr.appendChild(td);
+      });
+      
+      const actionTd = document.createElement('td');
+      actionTd.className = 'actions-cell';
+      
+      const editBtn = document.createElement('button');
+      editBtn.className = 'db-btn db-btn-edit';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => this.openForm(record));
+      
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'db-btn db-btn-delete';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => this.deleteRecord(record));
+      
+      actionTd.appendChild(editBtn);
+      actionTd.appendChild(deleteBtn);
+      tr.appendChild(actionTd);
+      
+      body.appendChild(tr);
+    });
+  },
+
+  openForm(record) {
+    this.currentRecord = record;
+    const schema = this.tableSchemas[this.currentTable] || [];
+    const form = document.getElementById('dbForm');
+    const title = document.getElementById('dbFormTitle');
+    
+    title.textContent = record ? `Edit ${this.currentTable}` : `Add ${this.currentTable}`;
+    form.innerHTML = '';
+    
+    schema.forEach(col => {
+      if (col.name === 'id' || col.name === 'message_count' || col.editable === false) {
+        return;
+      }
+      
+      const group = document.createElement('div');
+      group.className = 'db-form-group';
+      const label = document.createElement('label');
+      label.textContent = col.name;
+      group.appendChild(label);
+      
+      if (col.type === 'checkbox') {
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = col.name;
+        input.checked = record ? record[col.name] : false;
+        group.appendChild(input);
+      } else {
+        const input = document.createElement('input');
+        input.type = col.type || 'text';
+        input.name = col.name;
+        input.value = record ? (record[col.name] || '') : '';
+        input.disabled = col.editable === false;
+        if (col.required) input.required = true;
+        group.appendChild(input);
+      }
+      
+      form.appendChild(group);
+    });
+    
+    const actions = document.createElement('div');
+    actions.className = 'db-form-actions';
+    actions.innerHTML = `
+      <button type="button" class="btn-secondary" onclick="document.getElementById('dbFormModal').classList.remove('active')">Cancel</button>
+      <button type="submit" class="btn-primary">Save</button>
+    `;
+    form.appendChild(actions);
+    
+    document.getElementById('dbFormModal').classList.add('active');
+  },
+
+  async saveRecord() {
+    const schema = this.tableSchemas[this.currentTable] || [];
+    const form = document.getElementById('dbForm');
+    const formData = new FormData(form);
+    const data = {};
+    
+    schema.forEach(col => {
+      if (col.editable !== false && col.name !== 'id' && col.name !== 'message_count') {
+        const value = formData.get(col.name);
+        if (col.type === 'checkbox') {
+          data[col.name] = formData.get(col.name) !== null;
+        } else if (col.type === 'number') {
+          data[col.name] = value ? parseInt(value) : null;
+        } else {
+          data[col.name] = value;
+        }
+      }
+    });
+    
+    try {
+      let result;
+      if (this.currentRecord) {
+        result = await API.request(`/admin/db/${this.currentTable}/${this.currentRecord.id}`, 'PUT', data);
+        if (result.status === 200) {
+          UI.showToast('Record updated successfully', 'success');
+        }
+      } else {
+        result = await API.request(`/admin/db/${this.currentTable}`, 'POST', data);
+        if (result.status === 201) {
+          UI.showToast('Record created successfully', 'success');
+        }
+      }
+      
+      document.getElementById('dbFormModal').classList.remove('active');
+      this.loadTable(this.currentTable);
+    } catch (e) {
+      UI.showToast('Failed to save record', 'error');
+    }
+  },
+
+  async deleteRecord(record) {
+    if (!confirm(`Delete this ${this.currentTable} record?`)) return;
+    
+    const result = await API.request(`/admin/db/${this.currentTable}/${record.id}`, 'DELETE');
+    if (result.status === 200) {
+      UI.showToast('Record deleted successfully', 'success');
+      this.loadTable(this.currentTable);
+    } else {
+      UI.showToast('Failed to delete record', 'error');
+    }
+  }
+};
+
+const SpendingManager = {
+  async init() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
+    });
+    await this.loadTotalSpending();
+  },
+
+  async switchTab(tabName) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    
+    event.target.classList.add('active');
+    const tabEl = document.getElementById(`spending-${tabName}`);
+    if (tabEl) tabEl.classList.add('active');
+    
+    if (tabName === 'by-user') {
+      await this.loadByUser();
+    } else if (tabName === 'by-key') {
+      await this.loadByKey();
+    } else if (tabName === 'by-model') {
+      await this.loadByModel();
+    }
+  },
+
+  async loadTotalSpending() {
+    const result = await API.request('/admin/spending/total');
+    if (result.status === 200) {
+      const totalEl = document.getElementById('total-spending');
+      if (totalEl) {
+        totalEl.textContent = `$${result.data.total_cost.toFixed(2)}`;
+      }
+    }
+  },
+
+  async loadByUser() {
+    const result = await API.request('/admin/spending/by-user');
+    if (result.status === 200) {
+      const tbody = document.getElementById('spending-user-tbody');
+      tbody.innerHTML = '';
+      
+      if (!result.data.users || result.data.users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-message">No spending data</td></tr>';
+        return;
+      }
+      
+      result.data.users.forEach(user => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${user.email}</td>
+          <td>${user.name || 'N/A'}</td>
+          <td><strong>$${user.total_cost.toFixed(2)}</strong></td>
+          <td>${user.request_count}</td>
+          <td>${user.prompt_tokens.toLocaleString()}</td>
+          <td>${user.completion_tokens.toLocaleString()}</td>
+          <td><a href="#" class="user-detail-link" data-user-id="${user.user_id}">Details</a></td>
+        `;
+        tbody.appendChild(row);
+      });
+      
+      tbody.querySelectorAll('.user-detail-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          this.showUserDetail(link.dataset.userId);
+        });
+      });
+    }
+  },
+
+  async loadByKey() {
+    const result = await API.request('/admin/spending/by-key');
+    if (result.status === 200) {
+      const tbody = document.getElementById('spending-key-tbody');
+      tbody.innerHTML = '';
+      
+      if (!result.data.keys || result.data.keys.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-message">No spending data</td></tr>';
+        return;
+      }
+      
+      result.data.keys.forEach(key => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${key.key_name}</td>
+          <td>${key.user_email}</td>
+          <td><strong>$${key.total_cost.toFixed(2)}</strong></td>
+          <td>${key.request_count}</td>
+          <td>${key.prompt_tokens.toLocaleString()}</td>
+          <td>${key.completion_tokens.toLocaleString()}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+  },
+
+  async loadByModel() {
+    const result = await API.request('/admin/spending/by-model');
+    if (result.status === 200) {
+      const tbody = document.getElementById('spending-model-tbody');
+      tbody.innerHTML = '';
+      
+      if (!result.data.models || result.data.models.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-message">No spending data</td></tr>';
+        return;
+      }
+      
+      result.data.models.forEach(model => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${model.model || 'Unknown'}</td>
+          <td><strong>$${model.total_cost.toFixed(2)}</strong></td>
+          <td>${model.request_count}</td>
+          <td>${model.prompt_tokens.toLocaleString()}</td>
+          <td>${model.completion_tokens.toLocaleString()}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+  },
+
+  async showUserDetail(userId) {
+    const result = await API.request(`/admin/spending/user/${userId}`);
+    if (result.status === 200) {
+      const user = result.data;
+      let detail = `User: ${user.email}\nName: ${user.name}\nTotal Cost: $${user.total_cost.toFixed(2)}\nTotal Requests: ${user.total_requests}\n\nBreakdown by Model:\n`;
+      
+      user.model_breakdown.forEach(m => {
+        detail += `\n${m.model}: $${m.total_cost.toFixed(2)} (${m.request_count} requests)`;
+      });
+      
+      alert(detail);
+    }
+  }
+};

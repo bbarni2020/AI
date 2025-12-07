@@ -619,3 +619,74 @@ def update_whitelist():
         whitelist.whitelisted_domains = data['whitelisted_domains'].strip()
     db.session.commit()
     return jsonify({'ok': True})
+
+@admin_bp.get('/db/users')
+def db_list_users():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    users = User.query.all()
+    return jsonify([{
+        'id': u.id,
+        'email': u.email,
+        'name': u.name,
+        'google_id': u.google_id,
+        'user_key_id': u.user_key_id,
+        'created_at': u.created_at.isoformat(),
+        'ultimate_enabled': u.ultimate_enabled,
+        'web_search_count': u.web_search_count
+    } for u in users])
+
+@admin_bp.post('/db/users')
+def db_create_user():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    user_key = UserKey.query.filter_by(id=data.get('user_key_id')).first()
+    if not user_key:
+        return jsonify({'error': 'Invalid user_key_id'}), 400
+    user = User(
+        email=data.get('email', ''),
+        name=data.get('name', ''),
+        user_key_id=data.get('user_key_id'),
+        ultimate_enabled=data.get('ultimate_enabled', False)
+    )
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({
+        'id': user.id,
+        'email': user.email,
+        'name': user.name,
+        'user_key_id': user.user_key_id,
+        'created_at': user.created_at.isoformat(),
+        'ultimate_enabled': user.ultimate_enabled
+    }), 201
+
+@admin_bp.put('/db/users/<int:user_id>')
+def db_update_user(user_id):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'not found'}), 404
+    data = request.get_json(silent=True) or {}
+    if 'email' in data:
+        user.email = data['email']
+    if 'name' in data:
+        user.name = data['name']
+    if 'ultimate_enabled' in data:
+        user.ultimate_enabled = data['ultimate_enabled']
+    if 'web_search_count' in data:
+        user.web_search_count = data['web_search_count']
+    db.session.commit()
+    return jsonify({'ok': True})
+
+@admin_bp.delete('/db/users/<int:user_id>')
+def db_delete_user(user_id):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'not found'}), 404
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'ok': True})

@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderModeOptions();
     initModeSwitcher();
     initMobileSidebar();
+    initDragAndDrop();
     
     const input = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
@@ -412,7 +413,18 @@ function handleFileSelect(e) {
     const files = Array.from(e.target.files);
     if (!files.length) return;
 
+    processFiles(files);
+    e.target.value = '';
+}
+
+function processFiles(files) {
     files.forEach(file => {
+        const isImage = file.type.startsWith('image/');
+        const isVideo = file.type.startsWith('video/');
+        const isFile = true;
+        
+        if (!isImage && !isVideo && !isFile) return;
+        
         const reader = new FileReader();
         reader.onload = (e) => {
             selectedFiles.push(e.target.result);
@@ -421,8 +433,64 @@ function handleFileSelect(e) {
         };
         reader.readAsDataURL(file);
     });
+}
+
+function initDragAndDrop() {
+    const appContainer = document.getElementById('app-container');
     
-    e.target.value = '';
+    appContainer.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        appContainer.classList.add('drag-over');
+        showDragOverlay();
+    });
+    
+    appContainer.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.target === appContainer) {
+            appContainer.classList.remove('drag-over');
+            hideDragOverlay();
+        }
+    });
+    
+    appContainer.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        appContainer.classList.remove('drag-over');
+        hideDragOverlay();
+        
+        const files = Array.from(e.dataTransfer.files);
+        processFiles(files);
+    });
+}
+
+function showDragOverlay() {
+    let overlay = document.getElementById('drag-drop-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'drag-drop-overlay';
+        overlay.innerHTML = `
+            <div class="drag-drop-content">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <h2>Drop your files here</h2>
+                <p>Images, videos, and documents will be uploaded</p>
+            </div>
+        `;
+        document.getElementById('app-container').appendChild(overlay);
+    }
+    overlay.classList.add('active');
+}
+
+function hideDragOverlay() {
+    const overlay = document.getElementById('drag-drop-overlay');
+    if (overlay) {
+        overlay.classList.remove('active');
+    }
 }
 
 function renderFilePreview() {
@@ -633,7 +701,13 @@ async function sendMessage() {
     appendMessage('user', text, attachments, null, null, null);
 
     const mode = modeControl === 'manual' ? 'manual' : selectedMode;
-    const isImageModel = model && (model.includes('image') || model.includes('dall-e'));
+    let finalModel = model;
+    
+    if (mode === 'general' && !model) {
+        finalModel = 'google/gemini-2.5-flash';
+    }
+    
+    const isImageModel = finalModel && (finalModel.includes('image') || finalModel.includes('dall-e'));
     const useStream = mode !== 'ultimate' && !isImageModel;
 
     if (!useStream) {
@@ -647,7 +721,7 @@ async function sendMessage() {
                 body: JSON.stringify({
                     message: text,
                     conversation_id: currentConversationId,
-                    model: model,
+                    model: finalModel,
                     attachments: attachments,
                     use_web_search: !!useWebSearch,
                     mode: mode,
@@ -704,7 +778,7 @@ async function sendMessage() {
                 body: JSON.stringify({
                     message: text,
                     conversation_id: currentConversationId,
-                    model: model,
+                    model: finalModel,
                     attachments: attachments,
                     use_web_search: !!useWebSearch,
                     mode: mode,

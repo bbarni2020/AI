@@ -57,6 +57,28 @@ def trim_text(value, limit=2000):
         return text[:limit] + '...'
     return text
 
+def get_model_pricing(model_id):
+    try:
+        models_path = os.path.join(current_app.root_path, 'available_models.json')
+        with open(models_path, 'r') as f:
+            data = json.load(f)
+        for model in data.get('data', []):
+            if model.get('id') == model_id:
+                pricing = model.get('pricing', {})
+                return {
+                    'prompt': float(pricing.get('prompt', 0)),
+                    'completion': float(pricing.get('completion', 0)),
+                    'image': float(pricing.get('image', 0))
+                }
+    except Exception:
+        pass
+    return {'prompt': 0, 'completion': 0, 'image': 0}
+
+def calculate_cost(model_id, prompt_tokens, completion_tokens):
+    pricing = get_model_pricing(model_id)
+    cost = (prompt_tokens * pricing['prompt']) + (completion_tokens * pricing['completion'])
+    return round(cost, 6)
+
 def build_history_digest(history, limit=4):
     digest = []
     slice_source = history[-limit:]
@@ -507,32 +529,60 @@ def get_upstream_config():
     upstream_url = os.getenv('UPSTREAM_URL', 'https://ai.hackclub.com/proxy/v1').rstrip('/')
     return upstream_key, provider_id, upstream_url
 
-def route_request(message, has_files, upstream_key, upstream_url):
-    router_prompt = (
-        "You are a model router. Decide which AI model to use for the user's request.\n"
-        "Available models: \n"
-        "- google/gemini-3-pro-image-preview (Image Generation)\n"
-        "- google/gemini-3-pro-preview (Complex Multimodal, Reasoning, Coding, Files)\n"
-        "- openai/gpt-5.1 (Complex Reasoning, Coding)\n"
-        "- openai/gpt-5-mini (General Chat, Fast)\n"
-        "- nvidia/nemotron-nano-12b-v2-vl (Video/Document Understanding)\n"
-        "Rules:\n"
-        "1. If the user asks to generate, create, or draw an image, use 'google/gemini-3-pro-image-preview'.\n"
-        "2. If the user provides files/images (has_files=True), use 'google/gemini-3-pro-preview'.\n"
-        "3. For complex reasoning or coding, use 'openai/gpt-5.1'.\n"
-        "4. For general chat, use 'openai/gpt-5-mini'.\n"
-        "Return ONLY the model name."
-    )
-    
+def load_available_models():
     try:
+        models_path = os.path.join(current_app.root_path, 'available_models.json')
+        with open(models_path, 'r') as f:
+            data = json.load(f)
+        models = data.get('data', [])
+        model_list = []
+        for model in models:
+            model_id = model.get('id', '')
+            name = model.get('name', '')
+            description = model.get('description', '')
+            modality = model.get('architecture', {}).get('modality', '')
+            model_list.append({
+                'id': model_id,
+                'name': name,
+                'description': description,
+                'modality': modality
+            })
+        return model_list
+    except Exception as e:
+        current_app.logger.warning('Failed to load available models: %s', e)
+        return []
+
+def route_request(message, has_files, upstream_key, upstream_url):
+    try:
+        available = load_available_models()
+        if not available:
+            return 'google/gemini-2.5-flash'
+        
+        models_text = "Available models:\n"
+        for idx, m in enumerate(available, 1):
+            models_text += f"{idx}. {m['id']} - {m['name']}\n   Modality: {m['modality']}\n"
+        
+        router_prompt = (
+            "You are an intelligent model router. Based on the user's request and available models, "
+            "select the BEST model for the task.\n\n"
+            f"{models_text}\n\n"
+            "Selection Rules:\n"
+            "1. If user asks to generate/create/draw images: choose image-capable models (check modality for 'image' in output).\n"
+            "2. If user uploads files/images: choose multimodal models with 'image' in modality.\n"
+            "3. For coding/complex reasoning: prefer models with strong reasoning capabilities.\n"
+            "4. For general chat: prefer fast, efficient models.\n"
+            "5. For video/document analysis: prefer models with 'video' or 'file' in input modalities.\n\n"
+            "Return ONLY the model ID (e.g., 'google/gemini-3-pro-preview'), nothing else."
+        )
+        
         resp = requests.post(
             f"{upstream_url}/chat/completions",
             headers={'Authorization': f'Bearer {upstream_key}', 'Content-Type': 'application/json'},
             data=json.dumps({
-                'model': 'openai/gpt-5-mini',
+                'model': 'google/gemini-2.5-flash',
                 'messages': [
                     {'role': 'system', 'content': router_prompt},
-                    {'role': 'user', 'content': f"Request: {message[:500]}\nHas files: {has_files}"}
+                    {'role': 'user', 'content': f"Request: {message[:500]}\nUser has uploaded files: {has_files}"}
                 ],
                 'temperature': 0.0
             }),
@@ -540,10 +590,12 @@ def route_request(message, has_files, upstream_key, upstream_url):
         )
         if resp.status_code == 200:
             model = resp.json()['choices'][0]['message']['content'].strip()
-            return model
-    except:
-        pass
-    return 'openai/gpt-5.1'
+            if model:
+                return model
+    except Exception as e:
+        current_app.logger.warning('Model routing failed: %s', e)
+    
+    return 'google/gemini-2.5-flash'
 
 @chat_bp.post('/api/chat/message')
 def send_message():
@@ -718,6 +770,10 @@ def send_message():
             assistant_message_obj['images'] = response_images
         if web_context:
             assistant_message_obj['sources'] = web_context
+        
+        meta['request_tokens'] = usage_prompt
+        meta['response_tokens'] = usage_response
+        
         if meta:
             assistant_message_obj['meta'] = meta
 
@@ -725,12 +781,15 @@ def send_message():
         conv.messages = messages
         conv.updated_at = datetime.utcnow()
 
+        cost = calculate_cost(final_model, usage_prompt, usage_response)
         ul = UsageLog(
             provider_key_id=provider_id,
             user_key_id=user_key.id,
             request_tokens=usage_prompt,
             response_tokens=usage_response,
-            total_tokens=usage_total
+            total_tokens=usage_total,
+            model=final_model,
+            cost=cost
         )
         db.session.add(ul)
         user_key.last_used_at = datetime.utcnow()
@@ -807,6 +866,10 @@ def send_message():
                 yield f"data: {json.dumps({'type': 'images', 'images': response_images})}\n\n"
             if web_context:
                 assistant_message_obj['sources'] = web_context
+            
+            meta['request_tokens'] = usage_prompt
+            meta['response_tokens'] = usage_response
+            
             if meta:
                 assistant_message_obj['meta'] = meta
 
@@ -814,12 +877,15 @@ def send_message():
             conv.messages = messages
             conv.updated_at = datetime.utcnow()
 
+            cost = calculate_cost(final_model, usage_prompt, usage_response)
             ul = UsageLog(
                 provider_key_id=provider_id,
                 user_key_id=user_key.id,
                 request_tokens=usage_prompt,
                 response_tokens=usage_response,
-                total_tokens=usage_total
+                total_tokens=usage_total,
+                model=final_model,
+                cost=cost
             )
             db.session.add(ul)
             user_key.last_used_at = datetime.utcnow()
@@ -831,3 +897,244 @@ def send_message():
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
     
     return Response(stream_with_context(generate_stream()), mimetype='text/event-stream')
+
+@chat_bp.route('/admin/spending/total')
+def admin_total_spending():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    total_cost = 0.0
+    
+    users = User.query.all()
+    for user in users:
+        conversations = Conversation.query.filter_by(user_id=user.id).all()
+        for conv in conversations:
+            messages = conv.messages or []
+            for msg in messages:
+                if isinstance(msg, dict) and msg.get('role') == 'assistant':
+                    model = msg.get('model')
+                    if not model:
+                        continue
+                    
+                    content = msg.get('content', '')
+                    meta = msg.get('meta', {})
+                    
+                    request_tokens = 0
+                    response_tokens = 0
+                    
+                    if isinstance(meta, dict):
+                        request_tokens = meta.get('request_tokens', 0)
+                        response_tokens = meta.get('response_tokens', 0)
+                    
+                    if request_tokens > 0 or response_tokens > 0:
+                        cost = calculate_cost(model, request_tokens, response_tokens)
+                        total_cost += cost
+    
+    usage_logs_cost = db.session.query(func.sum(UsageLog.cost)).scalar() or 0.0
+    total_cost += usage_logs_cost
+    
+    return jsonify({'total_cost': round(total_cost, 2)})
+
+def calculate_user_spending(user_id):
+    total_cost = 0.0
+    request_count = 0
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    model_breakdown = {}
+    
+    conversations = Conversation.query.filter_by(user_id=user_id).all()
+    for conv in conversations:
+        messages = conv.messages or []
+        for msg in messages:
+            if isinstance(msg, dict) and msg.get('role') == 'assistant':
+                model = msg.get('model')
+                if not model:
+                    continue
+                
+                meta = msg.get('meta', {})
+                
+                request_tokens = 0
+                response_tokens = 0
+                
+                if isinstance(meta, dict):
+                    request_tokens = meta.get('request_tokens', 0)
+                    response_tokens = meta.get('response_tokens', 0)
+                
+                if request_tokens > 0 or response_tokens > 0:
+                    cost = calculate_cost(model, request_tokens, response_tokens)
+                    total_cost += cost
+                    request_count += 1
+                    total_prompt_tokens += request_tokens
+                    total_completion_tokens += response_tokens
+                    
+                    if model not in model_breakdown:
+                        model_breakdown[model] = {
+                            'cost': 0.0,
+                            'requests': 0,
+                            'prompt_tokens': 0,
+                            'completion_tokens': 0
+                        }
+                    model_breakdown[model]['cost'] += cost
+                    model_breakdown[model]['requests'] += 1
+                    model_breakdown[model]['prompt_tokens'] += request_tokens
+                    model_breakdown[model]['completion_tokens'] += response_tokens
+    
+    return {
+        'total_cost': round(total_cost, 2),
+        'request_count': request_count,
+        'prompt_tokens': total_prompt_tokens,
+        'completion_tokens': total_completion_tokens,
+        'model_breakdown': model_breakdown
+    }
+
+@chat_bp.route('/admin/spending/by-user')
+def admin_spending_by_user():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    users = User.query.all()
+    user_spending = []
+    
+    for user in users:
+        spending = calculate_user_spending(user.id)
+        if spending['request_count'] > 0 or spending['total_cost'] > 0:
+            user_spending.append({
+                'user_id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'total_cost': spending['total_cost'],
+                'request_count': spending['request_count'],
+                'prompt_tokens': spending['prompt_tokens'],
+                'completion_tokens': spending['completion_tokens']
+            })
+    
+    user_spending.sort(key=lambda x: x['total_cost'], reverse=True)
+    
+    return jsonify({'users': user_spending})
+
+@chat_bp.route('/admin/spending/by-key')
+def admin_spending_by_key():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    results = db.session.query(
+        UserKey.id,
+        UserKey.name,
+        User.email,
+        func.sum(UsageLog.cost).label('total_cost'),
+        func.count(UsageLog.id).label('request_count'),
+        func.sum(UsageLog.request_tokens).label('prompt_tokens'),
+        func.sum(UsageLog.response_tokens).label('completion_tokens')
+    ).join(
+        User, User.user_key_id == UserKey.id
+    ).join(
+        UsageLog, UsageLog.user_key_id == UserKey.id
+    ).group_by(
+        UserKey.id, UserKey.name, User.email
+    ).all()
+    
+    key_spending = []
+    for row in results:
+        key_spending.append({
+            'key_id': row[0],
+            'key_name': row[1],
+            'user_email': row[2],
+            'total_cost': round(row[3] or 0, 2),
+            'request_count': row[4] or 0,
+            'prompt_tokens': row[5] or 0,
+            'completion_tokens': row[6] or 0
+        })
+    
+    return jsonify({'keys': key_spending})
+
+@chat_bp.route('/admin/spending/by-model')
+def admin_spending_by_model():
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    model_spending = {}
+    
+    users = User.query.all()
+    for user in users:
+        spending = calculate_user_spending(user.id)
+        for model, breakdown in spending['model_breakdown'].items():
+            if model not in model_spending:
+                model_spending[model] = {
+                    'total_cost': 0.0,
+                    'request_count': 0,
+                    'prompt_tokens': 0,
+                    'completion_tokens': 0
+                }
+            model_spending[model]['total_cost'] += breakdown['cost']
+            model_spending[model]['request_count'] += breakdown['requests']
+            model_spending[model]['prompt_tokens'] += breakdown['prompt_tokens']
+            model_spending[model]['completion_tokens'] += breakdown['completion_tokens']
+    
+    usage_logs = db.session.query(
+        UsageLog.model,
+        func.sum(UsageLog.cost).label('total_cost'),
+        func.count(UsageLog.id).label('request_count'),
+        func.sum(UsageLog.request_tokens).label('prompt_tokens'),
+        func.sum(UsageLog.response_tokens).label('completion_tokens')
+    ).filter(UsageLog.model.isnot(None)).group_by(UsageLog.model).all()
+    
+    for row in usage_logs:
+        model = row[0]
+        if model not in model_spending:
+            model_spending[model] = {
+                'total_cost': 0.0,
+                'request_count': 0,
+                'prompt_tokens': 0,
+                'completion_tokens': 0
+            }
+        model_spending[model]['total_cost'] += row[1] or 0
+        model_spending[model]['request_count'] += row[2] or 0
+        model_spending[model]['prompt_tokens'] += row[3] or 0
+        model_spending[model]['completion_tokens'] += row[4] or 0
+    
+    result = []
+    for model, data in model_spending.items():
+        result.append({
+            'model': model,
+            'total_cost': round(data['total_cost'], 2),
+            'request_count': data['request_count'],
+            'prompt_tokens': data['prompt_tokens'],
+            'completion_tokens': data['completion_tokens']
+        })
+    
+    result.sort(key=lambda x: x['total_cost'], reverse=True)
+    
+    return jsonify({'models': result})
+
+@chat_bp.route('/admin/spending/user/<int:user_id>')
+def admin_user_spending_detail(user_id):
+    if 'admin' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'user not found'}), 404
+    
+    spending = calculate_user_spending(user_id)
+    
+    model_breakdown = []
+    for model, data in spending['model_breakdown'].items():
+        model_breakdown.append({
+            'model': model,
+            'total_cost': round(data['cost'], 2),
+            'request_count': data['requests'],
+            'prompt_tokens': data['prompt_tokens'],
+            'completion_tokens': data['completion_tokens']
+        })
+    
+    model_breakdown.sort(key=lambda x: x['total_cost'], reverse=True)
+    
+    return jsonify({
+        'user_id': user.id,
+        'email': user.email,
+        'name': user.name,
+        'total_cost': spending['total_cost'],
+        'total_requests': spending['request_count'],
+        'model_breakdown': model_breakdown
+    })
+

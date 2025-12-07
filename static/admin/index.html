@@ -96,6 +96,21 @@ CORS Settings
 </svg>
 Email Whitelist
 </a>
+<a href="#database" class="nav-item">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<ellipse cx="12" cy="5" rx="9" ry="3"/>
+<path d="M3 5v14a9 3 0 0 0 18 0V5"/>
+<path d="M3 12a9 3 0 0 0 18 0"/>
+</svg>
+Database
+</a>
+<a href="#spending" class="nav-item">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+<line x1="12" y1="1" x2="12" y2="23"/>
+<path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+</svg>
+Spending
+</a>
 </nav>
 <div class="sidebar-footer">
 <button class="theme-toggle" id="themeToggle">
@@ -632,6 +647,44 @@ Add Origin
 </div>
 </section>
 
+<section id="database" class="section">
+<div class="page-header">
+<h2>Database Management</h2>
+<p class="subtitle">View, create, edit, and delete database records</p>
+</div>
+
+<div class="db-tabs">
+<button class="db-tab-btn active" data-table="users">Users</button>
+</div>
+
+<div class="card form-card">
+<div class="card-header">
+<h3 id="dbTableTitle">Users</h3>
+<button id="dbAddBtn" class="btn-primary btn-small">+ Add Record</button>
+</div>
+<div class="card-content">
+<div class="db-table-wrapper">
+<table id="dbTable" class="db-table">
+<thead>
+<tr id="dbTableHead"></tr>
+</thead>
+<tbody id="dbTableBody"></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div id="dbFormModal" class="modal">
+<div class="modal-content">
+<div class="modal-header">
+<h3 id="dbFormTitle">Add Record</h3>
+<button class="modal-close">&times;</button>
+</div>
+<form id="dbForm" class="db-form"></form>
+</div>
+</div>
+</section>
+
 <section id="whitelist" class="section">
 <div class="page-header">
 <h2>Email Whitelist</h2>
@@ -683,6 +736,107 @@ Add Origin
 <code>@company.com<br>@subsidiary.com</code>
 </div>
 </div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="spending" class="section">
+<div class="section-header">
+<h2>Spending Analytics</h2>
+<div class="spending-tabs">
+<button class="tab-btn active" data-tab="total">Total</button>
+<button class="tab-btn" data-tab="by-user">By User</button>
+<button class="tab-btn" data-tab="by-key">By API Key</button>
+<button class="tab-btn" data-tab="by-model">By Model</button>
+</div>
+</div>
+
+<div id="spending-total" class="tab-content active">
+<div class="card">
+<div class="card-header">
+<h3>Total Spending</h3>
+</div>
+<div class="card-content">
+<div class="stat-display">
+<div class="stat-value" id="total-spending">$0.00</div>
+<div class="stat-label">Total Cost (USD)</div>
+</div>
+</div>
+</div>
+</div>
+
+<div id="spending-by-user" class="tab-content" style="display:none">
+<div class="card">
+<div class="card-header">
+<h3>Spending by User</h3>
+</div>
+<div class="card-content">
+<table class="data-table">
+<thead>
+<tr>
+<th>Email</th>
+<th>Name</th>
+<th>Total Cost</th>
+<th>Requests</th>
+<th>Prompt Tokens</th>
+<th>Completion Tokens</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody id="spending-user-tbody">
+<tr><td colspan="7" class="empty-message">Loading...</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div id="spending-by-key" class="tab-content" style="display:none">
+<div class="card">
+<div class="card-header">
+<h3>Spending by API Key</h3>
+</div>
+<div class="card-content">
+<table class="data-table">
+<thead>
+<tr>
+<th>Key Name</th>
+<th>User Email</th>
+<th>Total Cost</th>
+<th>Requests</th>
+<th>Prompt Tokens</th>
+<th>Completion Tokens</th>
+</tr>
+</thead>
+<tbody id="spending-key-tbody">
+<tr><td colspan="6" class="empty-message">Loading...</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+<div id="spending-by-model" class="tab-content" style="display:none">
+<div class="card">
+<div class="card-header">
+<h3>Spending by Model</h3>
+</div>
+<div class="card-content">
+<table class="data-table">
+<thead>
+<tr>
+<th>Model</th>
+<th>Total Cost</th>
+<th>Requests</th>
+<th>Prompt Tokens</th>
+<th>Completion Tokens</th>
+</tr>
+</thead>
+<tbody id="spending-model-tbody">
+<tr><td colspan="5" class="empty-message">Loading...</td></tr>
+</tbody>
+</table>
 </div>
 </div>
 </div>

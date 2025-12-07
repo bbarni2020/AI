@@ -37,6 +37,8 @@ class UsageLog(db.Model):
     request_tokens = db.Column(db.Integer, default=0, nullable=False)
     response_tokens = db.Column(db.Integer, default=0, nullable=False)
     total_tokens = db.Column(db.Integer, default=0, nullable=False)
+    model = db.Column(db.String(256), nullable=True)
+    cost = db.Column(db.Float, default=0.0, nullable=False)
 
 class CorsSettings(db.Model):
     __tablename__ = 'cors_settings'
