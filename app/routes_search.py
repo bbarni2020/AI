@@ -1,15 +1,20 @@
 import os
-from flask import Blueprint, jsonify, send_from_directory, request
+from flask import Blueprint, jsonify, send_from_directory, request, session, redirect, url_for
 import requests
 
 search_bp = Blueprint('search', __name__)
 
 @search_bp.route('/search')
 def search_page():
+    if 'user_id' not in session:
+        return redirect(url_for('chat.login'))
     return send_from_directory('../static/search', 'index.html')
 
 @search_bp.route('/api/search/<search_type>', methods=['GET'])
 def search_api(search_type):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    
     api_key = os.getenv('SEARCH_API_KEY', '').strip()
     if not api_key:
         return jsonify({'error': 'Search API not configured'}), 500
