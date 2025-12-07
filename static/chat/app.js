@@ -6,6 +6,22 @@ let modeHintResetHandle = null;
 let modeControl = 'smart';
 
 const MODE_ORDER = ['general', 'precise', 'turbo', 'ultimate'];
+
+function configureMarked() {
+    marked.setOptions({
+        highlight: function(code, lang) {
+            if (lang && hljs.getLanguage(lang)) {
+                try {
+                    return hljs.highlight(code, { language: lang }).value;
+                } catch (e) {}
+            }
+            return hljs.highlightAuto(code).value;
+        },
+        breaks: true,
+        gfm: true
+    });
+}
+
 const MODE_COPY = {
     general: { label: 'Általános', desc: 'Gyors és megbízható válaszok.', tag: 'Auto' },
     precise: { label: 'Pontos', desc: 'Maximális pontosság és részletek.', tag: 'GPT-5.1' },
@@ -21,6 +37,7 @@ const MODE_DISPLAY = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+    configureMarked();
     loadUser();
     loadHistory();
     loadModels();
@@ -624,11 +641,20 @@ function appendMessage(role, text, images, sources, modelName, meta) {
     content.innerHTML = htmlContent;
     
     let metaRow = null;
-
     if (role === 'assistant') {
         content.querySelectorAll('pre code').forEach((block) => {
             hljs.highlightElement(block);
         });
+        renderMathInElement(content, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false}
+            ],
+            throwOnError: false
+        });
+        metaRow = document.createElement('div');
         metaRow = document.createElement('div');
         metaRow.className = 'message-meta';
             const modelSpan = document.createElement('span');
