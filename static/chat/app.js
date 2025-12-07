@@ -4,6 +4,7 @@ let selectedMode = 'general';
 let ultimateUnlocked = false;
 let modeHintResetHandle = null;
 let modeControl = 'smart';
+let chatNameCache = {};
 
 const MODE_ORDER = ['general', 'precise', 'turbo', 'ultimate'];
 
@@ -78,7 +79,97 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     fileInput.addEventListener('change', handleFileSelect);
+    
+    initImageViewer();
 });
+
+function initImageViewer() {
+    document.addEventListener('click', (e) => {
+        const viewBtn = e.target.closest('.view-btn');
+        const downloadBtn = e.target.closest('.download-btn');
+        
+        if (viewBtn) {
+            const wrapper = viewBtn.closest('.img-preview-wrapper');
+            const imgUrl = wrapper.dataset.imgUrl;
+            openImageViewer(imgUrl);
+        }
+        
+        if (downloadBtn) {
+            const wrapper = downloadBtn.closest('.img-preview-wrapper');
+            const imgUrl = wrapper.dataset.imgUrl;
+            downloadImage(imgUrl);
+        }
+    });
+}
+
+function openImageViewer(imgUrl) {
+    let viewer = document.getElementById('image-viewer-modal');
+    
+    if (!viewer) {
+        viewer = document.createElement('div');
+        viewer.id = 'image-viewer-modal';
+        viewer.className = 'image-viewer-modal';
+        viewer.innerHTML = `
+            <div class="image-viewer-backdrop"></div>
+            <div class="image-viewer-content">
+                <button class="image-viewer-close" title="Close">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+                <img class="image-viewer-img" src="" alt="Image Preview">
+                <div class="image-viewer-actions">
+                    <button class="image-viewer-download" title="Download">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Download
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(viewer);
+        
+        const closeBtn = viewer.querySelector('.image-viewer-close');
+        const backdrop = viewer.querySelector('.image-viewer-backdrop');
+        const downloadBtn = viewer.querySelector('.image-viewer-download');
+        
+        const closeViewer = () => {
+            viewer.classList.remove('active');
+            setTimeout(() => viewer.remove(), 300);
+        };
+        
+        closeBtn.addEventListener('click', closeViewer);
+        backdrop.addEventListener('click', closeViewer);
+        
+        downloadBtn.addEventListener('click', () => {
+            const img = viewer.querySelector('.image-viewer-img');
+            downloadImage(img.src);
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && viewer.classList.contains('active')) {
+                closeViewer();
+            }
+        });
+    }
+    
+    const img = viewer.querySelector('.image-viewer-img');
+    img.src = imgUrl;
+    
+    setTimeout(() => viewer.classList.add('active'), 10);
+}
+
+function downloadImage(url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'image.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
 
 function initMobileSidebar() {
     const toggle = document.getElementById('sidebarToggle');
@@ -408,6 +499,21 @@ async function loadHistory() {
             list.appendChild(empty);
             return;
         }
+
+        const chatIds = history.map(item => item.id);
+        const namesRes = await fetch('/api/chat/names', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: chatIds })
+        });
+        
+        const chatNames = {};
+        if (namesRes.ok) {
+            const data = await namesRes.json();
+            Object.assign(chatNames, data.names || {});
+            Object.assign(chatNameCache, chatNames);
+        }
+
         history.forEach(item => {
             const div = document.createElement('div');
             div.className = 'history-item';
@@ -424,25 +530,15 @@ async function loadHistory() {
             path.setAttribute('d', 'M21 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z');
             icon.appendChild(path);
             const title = document.createElement('span');
-            async function getShortChatName(chatId, fallback) {
-                try {
-                    const res = await fetch(`/api/chat/name/${chatId}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data && data.name) return data.name;
-                    }
-                } catch {}
-                return fallback;
+            
+            let displayTitle = chatNames[item.id] || item.title || '';
+            if (!displayTitle.trim()) {
+                displayTitle = 'Új beszélgetés';
+            } else if (displayTitle.length > 40) {
+                displayTitle = displayTitle.slice(0, 37) + '...';
             }
-            (async () => {
-                let displayTitle = item.title || '';
-                if (!displayTitle.trim()) {
-                    displayTitle = 'Új beszélgetés';
-                } else if (displayTitle.length > 40) {
-                    displayTitle = displayTitle.slice(0, 37) + '...';
-                }
-                title.textContent = await getShortChatName(item.id, displayTitle);
-            })();
+            title.textContent = displayTitle;
+
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'history-delete-btn';
             deleteBtn.setAttribute('title', 'Beszélgetés törlése');
@@ -848,7 +944,7 @@ function appendMessage(role, text, images, sources, modelName, meta) {
 
     if (images && images.length > 0) {
         let imgsHtml = '<div class="message-images">';
-        images.forEach(img => {
+        images.forEach((img, idx) => {
             let url = img;
             if (typeof img === 'object') {
                 url = img.url || img.image_url || '';
@@ -856,12 +952,18 @@ function appendMessage(role, text, images, sources, modelName, meta) {
             }
             
             if (url) {
-                const filename = 'image.png';
                 imgsHtml += `
-                    <a class="img-link" href="${url}" target="_blank" download="${filename}">
-                        <img src="${url}" alt="Generated Image">
-                        <span class="img-download">⬇</span>
-                    </a>
+                    <div class="img-preview-wrapper" data-img-url="${url}" data-img-idx="${idx}">
+                        <img src="${url}" alt="Generated Image" class="preview-img">
+                        <div class="img-actions">
+                            <button class="img-action-btn view-btn" title="View">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                            <button class="img-action-btn download-btn" title="Download">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
                 `;
             }
         });

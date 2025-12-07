@@ -325,6 +325,57 @@ def get_history():
         'updated_at': c.updated_at.isoformat()
     } for c in conversations])
 
+@chat_bp.route('/api/chat/names', methods=['POST'])
+def get_chat_names_batch():
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    data = request.get_json()
+    conv_ids = data.get('ids', [])
+    
+    if not conv_ids:
+        return jsonify({'names': {}})
+    
+    conversations = Conversation.query.filter(
+        Conversation.id.in_(conv_ids),
+        Conversation.user_id == user_id
+    ).all()
+    
+    conv_map = {c.id: c for c in conversations}
+    result = {}
+    
+    for conv_id in conv_ids:
+        conv = conv_map.get(conv_id)
+        if not conv:
+            continue
+        
+        current_title = (conv.title or '').strip()
+        if current_title and current_title != 'New Chat':
+            result[conv_id] = current_title
+            continue
+        
+        history_messages = conv.messages or []
+        if history_messages:
+            first = history_messages[0]
+            content = first.get('content') if isinstance(first, dict) else None
+            text = ''
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get('type') == 'text':
+                        text = part.get('text', '')
+                        break
+            elif isinstance(content, str):
+                text = content
+            text = (text or '').strip()
+            if text:
+                result[conv_id] = text[:40] + ('...' if len(text) > 40 else '')
+                continue
+        
+        result[conv_id] = current_title or 'New Chat'
+    
+    return jsonify({'names': result})
+
 @chat_bp.route('/api/chat/name/<int:conv_id>')
 def get_chat_name(conv_id):
     if 'user_id' not in session:
