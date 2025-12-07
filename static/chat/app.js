@@ -424,7 +424,25 @@ async function loadHistory() {
             path.setAttribute('d', 'M21 15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z');
             icon.appendChild(path);
             const title = document.createElement('span');
-            title.textContent = item.title || 'Új beszélgetés';
+            async function getShortChatName(chatId, fallback) {
+                try {
+                    const res = await fetch(`/api/chat/name/${chatId}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.name) return data.name;
+                    }
+                } catch {}
+                return fallback;
+            }
+            (async () => {
+                let displayTitle = item.title || '';
+                if (!displayTitle.trim()) {
+                    displayTitle = 'Új beszélgetés';
+                } else if (displayTitle.length > 40) {
+                    displayTitle = displayTitle.slice(0, 37) + '...';
+                }
+                title.textContent = await getShortChatName(item.id, displayTitle);
+            })();
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'history-delete-btn';
             deleteBtn.setAttribute('title', 'Beszélgetés törlése');

@@ -145,6 +145,13 @@ body, html {
     gap: 8px;
 }
 
+.history-item span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .history-item:hover {
     background-color: var(--hover-bg);
 }
@@ -165,6 +172,9 @@ body, html {
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
 }
 
 .history-delete-btn:hover {

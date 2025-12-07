@@ -325,6 +325,80 @@ def get_history():
         'updated_at': c.updated_at.isoformat()
     } for c in conversations])
 
+@chat_bp.route('/api/chat/name/<int:conv_id>')
+def get_chat_name(conv_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    conv = Conversation.query.filter_by(id=conv_id, user_id=user_id).first()
+    if not conv:
+        return jsonify({'error': 'not found'}), 404
+
+    history_messages = conv.messages or []
+
+    def initial_title_guess():
+        if not history_messages:
+            return None
+        first = history_messages[0]
+        content = first.get('content') if isinstance(first, dict) else None
+        text = ''
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'text':
+                    text = part.get('text', '')
+                    break
+        elif isinstance(content, str):
+            text = content
+        return (text or '').strip()[:30] or None
+
+    initial_guess = initial_title_guess()
+    current_title = (conv.title or '').strip()
+    fallback = current_title or 'New Chat'
+
+    if current_title and current_title != 'New Chat' and initial_guess and current_title != initial_guess:
+        return jsonify({'name': current_title})
+
+    digest = build_history_digest(history_messages, limit=6)
+    if not digest:
+        return jsonify({'name': fallback})
+
+    try:
+        upstream_key, _, upstream_url = get_upstream_config()
+        prompt = (
+            "Generate a short 3-5 word title for this chat. "
+            "Keep it under 50 characters, no quotes, sentence case. "
+            "Stay neutral and specific.\n\nConversation:\n" + digest
+        )
+        content, _, _ = execute_completion(
+            DEFAULT_PRECISE_MODEL,
+            [
+                {'role': 'system', 'content': 'You write concise chat titles.'},
+                {'role': 'user', 'content': prompt}
+            ],
+            upstream_key,
+            upstream_url,
+            stream=False
+        )
+        name = ''
+        if isinstance(content, list):
+            name = ' '.join(part.get('text', '') for part in content if isinstance(part, dict))
+        elif isinstance(content, str):
+            name = content
+        name = (name or '').strip()
+        name = name.split('\n')[0].strip(' "\'')
+        if len(name) > 60:
+            name = name[:57] + '...'
+        if not name:
+            return jsonify({'name': fallback})
+        conv.title = name
+        conv.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'name': name})
+    except Exception as exc:
+        current_app.logger.warning('chat name generation failed: %s', exc)
+        return jsonify({'name': fallback})
+
 @chat_bp.route('/api/chat/conversation/<int:conv_id>')
 def get_conversation(conv_id):
     if 'user_id' not in session:
