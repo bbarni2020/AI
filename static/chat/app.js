@@ -26,7 +26,7 @@ const MODE_COPY = {
     general: { label: 'Általános', desc: 'Gyors és megbízható válaszok.', tag: 'Auto' },
     precise: { label: 'Pontos', desc: 'Maximális pontosság és részletek.', tag: 'GPT-5.1' },
     turbo: { label: 'Turbo', desc: 'Legerősebb elérhető modellek.', tag: 'Gemini Pro' },
-    ultimate: { label: 'Ultimate', desc: 'Két modell + egyesítés.', tag: 'Invite only' }
+    ultimate: { label: 'Ultimate', desc: 'Három modell + egyesítés.', tag: 'Invite only' }
 };
 const MODE_DISPLAY = {
     general: 'Általános',
@@ -518,48 +518,232 @@ async function sendMessage() {
 
     appendMessage('user', text, attachments, null, null, null);
 
-    const loadingId = 'loading-' + Date.now();
-    appendLoading(loadingId, useWebSearch);
+    const mode = modeControl === 'manual' ? 'manual' : selectedMode;
+    const useStream = mode !== 'ultimate';
 
-    try {
-        const res = await fetch('/api/chat/message', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: text,
-                conversation_id: currentConversationId,
-                model: model,
-                attachments: attachments,
-                use_web_search: !!useWebSearch,
-                mode: modeControl === 'manual' ? 'manual' : selectedMode
-            })
-        });
+    if (!useStream) {
+        const loadingId = 'loading-' + Date.now();
+        appendLoading(loadingId, useWebSearch);
 
-        const loadingEl = document.getElementById(loadingId);
-        if (loadingEl) loadingEl.remove();
+        try {
+            const res = await fetch('/api/chat/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    conversation_id: currentConversationId,
+                    model: model,
+                    attachments: attachments,
+                    use_web_search: !!useWebSearch,
+                    mode: mode,
+                    stream: false
+                })
+            });
 
-        if (res.ok) {
-            const data = await res.json();
-            appendMessage('assistant', data.message, data.images, data.sources, data.model, data.meta);
-            if (!currentConversationId) {
-                currentConversationId = data.conversation_id;
-                loadHistory();
+            const loadingEl = document.getElementById(loadingId);
+            if (loadingEl) loadingEl.remove();
+
+            if (res.ok) {
+                const data = await res.json();
+                appendMessage('assistant', data.message, data.images, data.sources, data.model, data.meta);
+                if (!currentConversationId) {
+                    currentConversationId = data.conversation_id;
+                    loadHistory();
+                }
+            } else {
+                let payload = null;
+                try {
+                    payload = await res.json();
+                } catch {}
+                let friendly = 'Hiba történt.';
+                if (payload?.error === 'rate_limit_exceeded') {
+                    friendly = 'Túl sok kérés. Várj egy kicsit!';
+                } else if (payload?.error === 'ultimate_not_allowed') {
+                    friendly = 'Nincs jogod Ultimate módot használni.';
+                }
+                appendMessage('assistant', friendly, null, null, null, null);
             }
-        } else {
-            let payload = null;
-            try {
-                payload = await res.json();
-            } catch (err) {
-                payload = null;
-            }
-            const friendly = buildFriendlyError(res.status, payload);
-            appendMessage('assistant', friendly, null, null, null, null);
+        } catch (err) {
+            const loadingEl = document.getElementById(loadingId);
+            if (loadingEl) loadingEl.remove();
+            appendMessage('assistant', 'Hálózati hiba.', null, null, null, null);
         }
-    } catch (e) {
-        const loadingEl = document.getElementById(loadingId);
-        if (loadingEl) loadingEl.remove();
-        appendMessage('assistant', 'Hálózati hiba.', null, null, null, null);
+    } else {
+        const streamMsgId = 'stream-' + Date.now();
+        const container = document.getElementById('chat-messages');
+        const streamDiv = document.createElement('div');
+        streamDiv.id = streamMsgId;
+        streamDiv.className = 'message assistant';
+        
+        const content = document.createElement('div');
+        content.className = 'message-content';
+        content.innerHTML = '<span class="word-cursor"></span>';
+        streamDiv.appendChild(content);
+        container.appendChild(streamDiv);
+        scrollToBottom();
+
+        try {
+            const res = await fetch('/api/chat/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    conversation_id: currentConversationId,
+                    model: model,
+                    attachments: attachments,
+                    use_web_search: !!useWebSearch,
+                    mode: mode,
+                    stream: true
+                })
+            });
+
+            if (!res.ok) {
+                streamDiv.remove();
+                let payload = null;
+                try {
+                    payload = await res.json();
+                } catch {}
+                let friendly = 'Hiba történt.';
+                if (payload?.error === 'rate_limit_exceeded') {
+                    friendly = 'Túl sok kérés. Várj egy kicsit!';
+                } else if (payload?.error === 'ultimate_not_allowed') {
+                    friendly = 'Nincs jogod Ultimate módot használni.';
+                }
+                appendMessage('assistant', friendly, null, null, null, null);
+                return;
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulated = '';
+            let streamData = {};
+            let lastWordCount = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const jsonStr = line.slice(6);
+                        if (jsonStr.trim()) {
+                            try {
+                                const data = JSON.parse(jsonStr);
+                                
+                                if (data.type === 'start') {
+                                    streamData = data.data;
+                                    if (!currentConversationId) {
+                                        currentConversationId = streamData.conversation_id;
+                                    }
+                                } else if (data.type === 'content') {
+                                    accumulated += data.content;
+                                    const htmlContent = marked.parse(accumulated);
+                                    
+                                    const tempDiv = document.createElement('div');
+                                    tempDiv.innerHTML = htmlContent;
+                                    const textContent = tempDiv.textContent || '';
+                                    const words = textContent.trim().split(/\s+/);
+                                    const currentWordCount = words.length;
+                                    
+                                    if (currentWordCount > lastWordCount) {
+                                        content.innerHTML = htmlContent + '<span class="word-cursor"></span>';
+                                        content.querySelectorAll('pre code').forEach((block) => {
+                                            hljs.highlightElement(block);
+                                        });
+                                        
+                                        const newWords = content.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th');
+                                        newWords.forEach(el => {
+                                            if (!el.classList.contains('word-animated')) {
+                                                el.classList.add('word-animated');
+                                            }
+                                        });
+                                        
+                                        lastWordCount = currentWordCount;
+                                        scrollToBottom();
+                                    }
+                                } else if (data.type === 'done') {
+                                    const htmlContent = marked.parse(accumulated);
+                                    content.innerHTML = htmlContent;
+                                    content.querySelectorAll('pre code').forEach((block) => {
+                                        hljs.highlightElement(block);
+                                    });
+                                    renderMathInElement(content, {
+                                        delimiters: [
+                                            {left: '$$', right: '$$', display: true},
+                                            {left: '$', right: '$', display: false},
+                                            {left: '\\[', right: '\\]', display: true},
+                                            {left: '\\(', right: '\\)', display: false},
+                                            {left: '[', right: ']', display: true},
+                                            {left: '(', right: ')', display: false}
+                                        ],
+                                        throwOnError: false
+                                    });
+
+                                    if (streamData.sources && streamData.sources.length) {
+                                        const sourcesDiv = document.createElement('div');
+                                        sourcesDiv.className = 'message-sources';
+                                        const sourcesHeader = '<div class="sources-header"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Web források</div>';
+                                        sourcesDiv.innerHTML = sourcesHeader + streamData.sources.map((src, idx) => {
+                                            const title = src.title || src.url || `Forrás ${idx + 1}`;
+                                            const href = src.url || '#';
+                                            return `<div class="source-item">[${idx + 1}] <a href="${href}" target="_blank" rel="noopener">${title}</a></div>`;
+                                        }).join('');
+                                        content.appendChild(sourcesDiv);
+                                    }
+
+                                    const metaRow = document.createElement('div');
+                                    metaRow.className = 'message-meta';
+                                    const modelSpan = document.createElement('span');
+                                    modelSpan.className = 'message-model';
+                                    let modelLabel = streamData.model ? `Model: ${streamData.model}` : '';
+                                    const modeLabel = streamData.meta && streamData.meta.mode ? MODE_DISPLAY[streamData.meta.mode] : null;
+                                    if (modeLabel) {
+                                        modelLabel = modelLabel ? `${modelLabel} • ${modeLabel}` : modeLabel;
+                                    }
+                                    modelSpan.textContent = modelLabel;
+                                    const actions = document.createElement('div');
+                                    actions.className = 'message-actions';
+                                    const copyBtn = document.createElement('button');
+                                    copyBtn.className = 'copy-btn';
+                                    copyBtn.setAttribute('title', 'Szöveg másolása');
+                                    const copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+                                    copyBtn.dataset.icon = copyIcon;
+                                    copyBtn.innerHTML = copyIcon;
+                                    copyBtn.addEventListener('click', () => copyMessageText(copyBtn, accumulated));
+                                    actions.appendChild(copyBtn);
+                                    metaRow.appendChild(modelSpan);
+                                    metaRow.appendChild(actions);
+                                    content.appendChild(metaRow);
+                                    
+                                    loadHistory();
+                                    scrollToBottom();
+                                } else if (data.type === 'error') {
+                                    streamDiv.remove();
+                                    appendMessage('assistant', 'Hiba: ' + data.error, null, null, null, null);
+                                }
+                            } catch (e) {
+                                console.error('Parse error:', e);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            streamDiv.remove();
+            appendMessage('assistant', 'Hálózati hiba.', null, null, null, null);
+        }
     }
+
+    updateSendButton();
+}
+
+function scrollToBottom() {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    const container = document.getElementById('chat-messages');
+    container.scrollTop = container.scrollHeight;
 }
 
 function appendLoading(id, isWebSearching = false) {
@@ -639,6 +823,9 @@ function appendMessage(role, text, images, sources, modelName, meta) {
     }
     
     content.innerHTML = htmlContent;
+    if (role === 'assistant' && meta && meta.mode === 'ultimate') {
+        content.classList.add('word-animated');
+    }
     
     let metaRow = null;
     if (role === 'assistant') {
@@ -650,7 +837,9 @@ function appendMessage(role, text, images, sources, modelName, meta) {
                 {left: '$$', right: '$$', display: true},
                 {left: '$', right: '$', display: false},
                 {left: '\\[', right: '\\]', display: true},
-                {left: '\\(', right: '\\)', display: false}
+                {left: '\\(', right: '\\)', display: false},
+                {left: '[', right: ']', display: true},
+                {left: '(', right: ')', display: false}
             ],
             throwOnError: false
         });

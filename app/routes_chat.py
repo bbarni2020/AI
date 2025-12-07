@@ -3,7 +3,7 @@ import json
 import unicodedata
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Blueprint, session, redirect, url_for, request, jsonify, current_app
+from flask import Blueprint, session, redirect, url_for, request, jsonify, current_app, Response, stream_with_context
 from authlib.integrations.flask_client import OAuth
 from .models import User, UserKey, Conversation, UsageLog, ProviderKey, EmailWhitelist
 from . import db
@@ -72,18 +72,23 @@ def build_history_digest(history, limit=4):
         digest.append(f"{entry.get('role', 'user')}: {trim_text(text, 400)}")
     return '\n'.join(digest)
 
-def execute_completion(model_name, messages, upstream_key, upstream_url, temperature=None):
-    payload = {'model': model_name, 'messages': messages}
+def execute_completion(model_name, messages, upstream_key, upstream_url, temperature=None, stream=False):
+    payload = {'model': model_name, 'messages': messages, 'stream': stream}
     if temperature is not None:
         payload['temperature'] = temperature
     resp = requests.post(
         f"{upstream_url}/chat/completions",
         headers={'Authorization': f'Bearer {upstream_key}', 'Content-Type': 'application/json'},
         data=json.dumps(payload),
-        timeout=120
+        timeout=120,
+        stream=stream
     )
     if resp.status_code != 200:
         raise UpstreamError(resp.text or 'Upstream error', resp.status_code)
+    
+    if stream:
+        return resp
+    
     data = resp.json()
     choice = data['choices'][0]['message']
     content = choice.get('content')
@@ -432,6 +437,8 @@ def send_message():
     attachments = data.get('attachments', [])
     use_web_search = bool(data.get('use_web_search'))
     mode = normalize_mode(data.get('mode'))
+    use_stream = bool(data.get('stream', True))
+    
     if mode == 'ultimate' and not user.ultimate_enabled:
         return jsonify({'error': 'ultimate_not_allowed'}), 403
     web_context = []
@@ -528,86 +535,163 @@ def send_message():
         upstream_messages.insert(0, context_message)
 
     meta = {'mode': mode}
-    response_images = []
-    assistant_msg_content = ''
-    usage_prompt = 0
-    usage_response = 0
-    usage_total = 0
-    try:
-        if mode == 'ultimate':
-            ensemble = run_ultimate_ensemble(upstream_messages, messages, upstream_key, upstream_url, message or '', web_context)
-            assistant_msg_content = ensemble['content']
-            response_images = ensemble['images']
-            final_model = ensemble['model']
-            usage_prompt = ensemble['usage']['prompt']
-            usage_response = ensemble['usage']['response']
-            usage_total = ensemble['usage']['total']
-            meta['ultimate_candidates'] = [
-                {
-                    'model': item['model'],
-                    'excerpt': trim_text(item['content'], 1200)
-                }
-                for item in ensemble['candidates']
-            ]
-            meta['aggregator_model'] = ensemble['aggregator_model']
-        else:
-            if mode == 'general':
-                if requested_model and requested_model != 'AI':
-                    final_model = requested_model
-                else:
-                    final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
-            elif mode == 'precise':
-                final_model = DEFAULT_PRECISE_MODEL
-            elif mode == 'turbo':
-                final_model = DEFAULT_TURBO_MODEL
-            elif mode == 'manual':
-                if requested_model and requested_model != 'AI':
-                    final_model = requested_model
-                else:
-                    final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
-            else:
-                final_model = DEFAULT_PRECISE_MODEL
-            assistant_msg_content, response_images, resp_data = execute_completion(final_model, upstream_messages, upstream_key, upstream_url)
-            usage_prompt, usage_response, usage_total = extract_tokens(resp_data)
-    except UpstreamError as exc:
-        return jsonify({'error': 'Upstream error', 'details': str(exc)}), exc.status_code
-    except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
-
-    assistant_message_obj = {
-        'role': 'assistant',
-        'content': assistant_msg_content or '',
-        'model': final_model
-    }
-    if response_images:
-        assistant_message_obj['images'] = response_images
-    if web_context:
-        assistant_message_obj['sources'] = web_context
-    if meta:
-        assistant_message_obj['meta'] = meta
-
-    messages.append(assistant_message_obj)
-    conv.messages = messages
-    conv.updated_at = datetime.utcnow()
-
-    ul = UsageLog(
-        provider_key_id=provider_id,
-        user_key_id=user_key.id,
-        request_tokens=usage_prompt,
-        response_tokens=usage_response,
-        total_tokens=usage_total
-    )
-    db.session.add(ul)
-    user_key.last_used_at = datetime.utcnow()
-    db.session.commit()
     
-    return jsonify({
-        'conversation_id': conv.id,
-        'message': assistant_msg_content,
-        'images': response_images,
-        'title': conv.title,
-        'model': final_model,
-        'sources': web_context,
-        'meta': meta,
-        'mode': mode
-    })
+    if mode == 'general':
+        if requested_model and requested_model != 'AI':
+            final_model = requested_model
+        else:
+            final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
+    elif mode == 'precise':
+        final_model = DEFAULT_PRECISE_MODEL
+    elif mode == 'turbo':
+        final_model = DEFAULT_TURBO_MODEL
+    elif mode == 'manual':
+        if requested_model and requested_model != 'AI':
+            final_model = requested_model
+        else:
+            final_model = route_request(message or "Image analysis", bool(attachments), upstream_key, upstream_url)
+    else:
+        final_model = DEFAULT_PRECISE_MODEL
+
+    if mode == 'ultimate' or not use_stream:
+        response_images = []
+        assistant_msg_content = ''
+        usage_prompt = 0
+        usage_response = 0
+        usage_total = 0
+        try:
+            if mode == 'ultimate':
+                ensemble = run_ultimate_ensemble(upstream_messages, messages, upstream_key, upstream_url, message or '', web_context)
+                assistant_msg_content = ensemble['content']
+                response_images = ensemble['images']
+                final_model = ensemble['model']
+                usage_prompt = ensemble['usage']['prompt']
+                usage_response = ensemble['usage']['response']
+                usage_total = ensemble['usage']['total']
+                meta['ultimate_candidates'] = [
+                    {
+                        'model': item['model'],
+                        'excerpt': trim_text(item['content'], 1200)
+                    }
+                    for item in ensemble['candidates']
+                ]
+                meta['aggregator_model'] = ensemble['aggregator_model']
+            else:
+                assistant_msg_content, response_images, resp_data = execute_completion(final_model, upstream_messages, upstream_key, upstream_url)
+                usage_prompt, usage_response, usage_total = extract_tokens(resp_data)
+        except UpstreamError as exc:
+            return jsonify({'error': 'Upstream error', 'details': str(exc)}), exc.status_code
+        except Exception as exc:
+            return jsonify({'error': str(exc)}), 500
+
+        assistant_message_obj = {
+            'role': 'assistant',
+            'content': assistant_msg_content or '',
+            'model': final_model
+        }
+        if response_images:
+            assistant_message_obj['images'] = response_images
+        if web_context:
+            assistant_message_obj['sources'] = web_context
+        if meta:
+            assistant_message_obj['meta'] = meta
+
+        messages.append(assistant_message_obj)
+        conv.messages = messages
+        conv.updated_at = datetime.utcnow()
+
+        ul = UsageLog(
+            provider_key_id=provider_id,
+            user_key_id=user_key.id,
+            request_tokens=usage_prompt,
+            response_tokens=usage_response,
+            total_tokens=usage_total
+        )
+        db.session.add(ul)
+        user_key.last_used_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'conversation_id': conv.id,
+            'message': assistant_msg_content,
+            'images': response_images,
+            'title': conv.title,
+            'model': final_model,
+            'sources': web_context,
+            'meta': meta,
+            'mode': mode
+        })
+    
+    def generate_stream():
+        try:
+            stream_resp = execute_completion(final_model, upstream_messages, upstream_key, upstream_url, stream=True)
+            
+            initial_data = {
+                'conversation_id': conv.id,
+                'model': final_model,
+                'title': conv.title,
+                'sources': web_context,
+                'meta': meta,
+                'mode': mode
+            }
+            yield f"data: {json.dumps({'type': 'start', 'data': initial_data})}\n\n"
+            
+            accumulated_content = ''
+            usage_prompt = 0
+            usage_response = 0
+            usage_total = 0
+            
+            for line in stream_resp.iter_lines():
+                if line:
+                    line_str = line.decode('utf-8')
+                    if line_str.startswith('data: '):
+                        chunk_data = line_str[6:]
+                        if chunk_data.strip() == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(chunk_data)
+                            if 'choices' in chunk and len(chunk['choices']) > 0:
+                                delta = chunk['choices'][0].get('delta', {})
+                                content = delta.get('content', '')
+                                if content:
+                                    accumulated_content += content
+                                    yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
+                            
+                            if 'usage' in chunk:
+                                usage_prompt = chunk['usage'].get('prompt_tokens', 0)
+                                usage_response = chunk['usage'].get('completion_tokens', 0)
+                                usage_total = chunk['usage'].get('total_tokens', 0)
+                        except json.JSONDecodeError:
+                            pass
+            
+            assistant_message_obj = {
+                'role': 'assistant',
+                'content': accumulated_content,
+                'model': final_model
+            }
+            if web_context:
+                assistant_message_obj['sources'] = web_context
+            if meta:
+                assistant_message_obj['meta'] = meta
+
+            messages.append(assistant_message_obj)
+            conv.messages = messages
+            conv.updated_at = datetime.utcnow()
+
+            ul = UsageLog(
+                provider_key_id=provider_id,
+                user_key_id=user_key.id,
+                request_tokens=usage_prompt,
+                response_tokens=usage_response,
+                total_tokens=usage_total
+            )
+            db.session.add(ul)
+            user_key.last_used_at = datetime.utcnow()
+            db.session.commit()
+            
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+    
+    return Response(stream_with_context(generate_stream()), mimetype='text/event-stream')
