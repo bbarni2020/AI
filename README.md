@@ -1,26 +1,8 @@
 # AI Gateway
 
-A dead-simple Flask proxy I threw together to stop managing a dozen API keys across projects. Sits between your apps and Hack Club's AI service, keeps your actual API key hidden, and lets you spin up throwaway keys for different projects or services.
+Tiny Flask proxy that sits between your apps and Hack Club's AI service. Hides the real upstream key, lets you hand out disposable keys, and keeps some gentle rate limits so you don't burn through quota. I run it for my own side projects; it isn't fancy, but it holds up.
 
-Rate limiting's built in so you won't accidentally torch your quota or rack up surprise bills. Also gives you a quick dashboard to see what's actually using your API key and how much.
-
-Nothing fancy, but it works.
-
-## What's in the box?
-
-- **Admin Dashboard**: A simple, no-frills web UI to manage your keys. Find it at `/admin/`.
-- **Key Management**: Create, edit, and delete user-facing API keys. You can enable/disable them on the fly.
-- **Rate Limiting**: Set limits per minute and per day for both requests and tokens. Helps prevent runaway scripts from causing trouble.
-- **Usage Stats**: See total requests and tokens used for each key, plus some basic daily usage graphs.
-- **Proxy Endpoint**: A single endpoint (`/api/proxy/chat/completions`) that routes requests to the upstream API using your provider keys in rotation.
-
-## Getting Started
-
-I've tried to make this pretty straightforward.
-
-**1. Clone & Setup:**
-
-First, grab the code and set up a Python virtual environment.
+## Setup (10-minute version)
 
 ```bash
 git clone https://github.com/bbarni2020/AI.git
@@ -28,43 +10,27 @@ cd AI
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env  # set ADMIN_USER, ADMIN_PASS, UPSTREAM_API_KEY, etc.
+./run.sh              # starts Waitress on 127.0.0.1:5000
 ```
 
-**2. Configure:**
+Hit `http://127.0.0.1:5000/admin/` to log in and mint user keys. If it breaks, you get to keep both pieces.
 
-There's a `.env.example` file. Copy it and fill it out.
+## What it does
 
-```bash
-cp .env.example .env
-# Now open .env in your editor and set your own values
-```
+- Admin UI at `/admin/` to toggle/rotate user-facing keys and mint new ones when you need to share access.
+- Normal API calling through `/api/proxy/chat/completions`; it hides your real key and does the auth header juggling for you.
+- Per-key request/token limits so runaway scripts get throttled; usage stats so you can see who's noisy.
+- Chat front-end with modes: normal and precise for everyday stuff, turbo when you want speed over cost, and "ultimate" (invite-only) if you're testing the spicy model. You can pick the upstream model per call.
+- Experimental search tab that just exercises Hack Club's new search API.
 
-You'll definitely want to set `ADMIN_USER` and `ADMIN_PASS` to something other than the defaults. You'll also need to provide your upstream provider API key in `UPSTREAM_API_KEY`.
-
-**3. Run it:**
-
-I included a simple shell script to get the server running.
-
-```bash
-./run.sh
-```
-
-This will start the Waitress server. You should be able to access the admin panel at `http://127.0.0.1:5000/admin/`.
-
-## Using the Proxy
-
-Once it's running, you can send your API requests to your proxy server instead of directly to the AI provider. Just make sure to use one of the user keys you created in the admin dashboard for authentication.
-
-Here’s a quick `curl` example:
+## Quick call
 
 ```bash
 curl http://127.0.0.1:5000/api/proxy/chat/completions \
   -H "Authorization: Bearer sk_YOUR_USER_KEY_HERE" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [{"role": "user", "content": "Hello, world!"}]
-  }'
+  -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "ping"}]}'
 ```
 
-The proxy will pick one of your enabled provider keys, send the request upstream, log the usage, and then pass the response back to you.
+The proxy picks an enabled provider key, forwards, logs, and echoes the response back.
