@@ -1,11 +1,15 @@
 import os
 import json
 import unicodedata
+import secrets
+import threading
 import requests
+from collections import defaultdict
+from queue import Queue, Empty
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Blueprint, session, redirect, url_for, request, jsonify, current_app, Response, stream_with_context
 from authlib.integrations.flask_client import OAuth
-from .models import User, UserKey, Conversation, UsageLog, ProviderKey, EmailWhitelist
+from .models import User, UserKey, Conversation, UsageLog, ProviderKey, EmailWhitelist, CollabRoom, CollabMembership, CollabMessage
 from . import db
 from .utils import generate_api_key, extract_tokens, gather_web_context
 from datetime import datetime, timedelta
@@ -16,6 +20,9 @@ WEB_SEARCH_LIMIT_ULTIMATE = 65
 
 chat_bp = Blueprint('chat', __name__)
 oauth = OAuth()
+
+room_subscribers = defaultdict(list)
+room_subscribers_lock = threading.Lock()
 
 class UpstreamError(Exception):
     def __init__(self, message, status_code=500):
@@ -78,6 +85,69 @@ def calculate_cost(model_id, prompt_tokens, completion_tokens):
     pricing = get_model_pricing(model_id)
     cost = (prompt_tokens * pricing['prompt']) + (completion_tokens * pricing['completion'])
     return round(cost, 6)
+
+
+def generate_room_code():
+    for _ in range(6):
+        code = secrets.token_hex(3).upper()
+        exists = CollabRoom.query.filter_by(code=code).first()
+        if not exists:
+            return code
+    return secrets.token_hex(4).upper()
+
+
+def serialize_room(room):
+    return {
+        'code': room.code,
+        'name': room.name,
+        'updated_at': room.updated_at.isoformat() if room.updated_at else None,
+        'created_at': room.created_at.isoformat() if room.created_at else None,
+        'created_by': room.created_by,
+        'system_prompt': room.system_prompt or ''
+    }
+
+
+def serialize_collab_message(message):
+    user = message.user
+    return {
+        'id': message.id,
+        'room_code': message.room.code if message.room else None,
+        'role': message.role,
+        'content': message.content,
+        'model': message.model,
+        'meta': message.meta or {},
+        'created_at': message.created_at.isoformat() if message.created_at else None,
+        'user': {
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'picture': user.picture
+        } if user else None
+    }
+
+
+def broadcast_room_event(room_code, payload):
+    with room_subscribers_lock:
+        queues = list(room_subscribers.get(room_code, []))
+    for q in queues:
+        try:
+            q.put(payload, block=False)
+        except Exception:
+            continue
+
+
+def subscribe_room(room_code):
+    queue_obj = Queue()
+    with room_subscribers_lock:
+        room_subscribers[room_code].append(queue_obj)
+    return queue_obj
+
+
+def unsubscribe_room(room_code, queue_obj):
+    with room_subscribers_lock:
+        subs = room_subscribers.get(room_code, [])
+        if queue_obj in subs:
+            subs.remove(queue_obj)
 
 def build_history_digest(history, limit=4):
     digest = []
@@ -319,6 +389,13 @@ def index():
         return redirect(url_for('chat.login'))
     return current_app.send_static_file('chat/index.html')
 
+
+@chat_bp.route('/collab')
+def collab():
+    if 'user_id' not in session:
+        return redirect(url_for('chat.login'))
+    return current_app.send_static_file('collab/index.html')
+
 @chat_bp.route('/api/chat/me')
 def get_me():
     if 'user_id' not in session:
@@ -513,6 +590,341 @@ def get_models():
         return jsonify(models_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def ensure_membership(room, user_id):
+    membership = CollabMembership.query.filter_by(room_id=room.id, user_id=user_id).first()
+    if membership:
+        return membership
+    membership = CollabMembership(room_id=room.id, user_id=user_id)
+    db.session.add(membership)
+    db.session.commit()
+    return membership
+
+
+def start_collab_ai_response(room, sender, prompt_text):
+    app = current_app._get_current_object()
+
+    def runner():
+        with app.app_context():
+            sender_user = None
+            sender_key_id = None
+            if sender:
+                sender_user = User.query.get(sender.id)
+                if sender_user and sender_user.user_key:
+                    sender_key_id = sender_user.user_key.id
+            try:
+                upstream_key, provider_id, upstream_url = get_upstream_config()
+            except Exception as exc:
+                broadcast_room_event(room.code, {'type': 'error', 'message': str(exc)})
+                return
+
+            history = CollabMessage.query.filter_by(room_id=room.id).order_by(CollabMessage.created_at.asc()).all()
+            system_content = room.system_prompt or 'You are in a shared room. Keep answers concise, mention findings clearly, and assume multiple humans see the transcript.'
+            upstream_messages = [
+                {
+                    'role': 'system',
+                    'content': system_content
+                }
+            ]
+            for msg in history:
+                role = 'assistant' if msg.role == 'assistant' else 'user'
+                upstream_messages.append({'role': role, 'content': msg.content})
+
+            final_model = route_request(prompt_text or 'Collaborative chat', False, upstream_key, upstream_url)
+            if not final_model:
+                final_model = DEFAULT_PRECISE_MODEL
+
+            try:
+                stream_resp = execute_completion(final_model, upstream_messages, upstream_key, upstream_url, stream=True)
+            except UpstreamError as exc:
+                broadcast_room_event(room.code, {'type': 'error', 'message': str(exc)})
+                return
+            except Exception as exc:
+                broadcast_room_event(room.code, {'type': 'error', 'message': str(exc)})
+                return
+
+            accumulated = ''
+            usage_prompt = 0
+            usage_response = 0
+            usage_total = 0
+            broadcast_room_event(room.code, {'type': 'ai_start', 'model': final_model})
+
+            for line in stream_resp.iter_lines():
+                if not line:
+                    continue
+                chunk_str = line.decode('utf-8') if isinstance(line, (bytes, bytearray)) else str(line)
+                if not chunk_str.startswith('data: '):
+                    continue
+                payload = chunk_str[6:]
+                if payload.strip() == '[DONE]':
+                    break
+                try:
+                    data = json.loads(payload)
+                except Exception:
+                    continue
+                if 'choices' in data and data['choices']:
+                    delta = data['choices'][0].get('delta', {})
+                    text_part = delta.get('content', '')
+                    if text_part:
+                        accumulated += text_part
+                        broadcast_room_event(room.code, {'type': 'ai_delta', 'content': text_part})
+                if 'usage' in data:
+                    usage_prompt = data['usage'].get('prompt_tokens', 0)
+                    usage_response = data['usage'].get('completion_tokens', 0)
+                    usage_total = data['usage'].get('total_tokens', 0)
+
+            if not accumulated.strip():
+                broadcast_room_event(room.code, {'type': 'error', 'message': 'Empty response from model'})
+                return
+
+            assistant_msg = CollabMessage(
+                room_id=room.id,
+                user_id=None,
+                role='assistant',
+                content=accumulated,
+                model=final_model,
+                meta={'request_tokens': usage_prompt, 'response_tokens': usage_response}
+            )
+            db.session.add(assistant_msg)
+            room.updated_at = datetime.utcnow()
+
+            cost = calculate_cost(final_model, usage_prompt, usage_response)
+            ul = UsageLog(
+                provider_key_id=provider_id,
+                user_key_id=sender_key_id,
+                request_tokens=usage_prompt,
+                response_tokens=usage_response,
+                total_tokens=usage_total,
+                model=final_model,
+                cost=cost
+            )
+            if sender_user and sender_user.user_key:
+                sender_user.user_key.last_used_at = datetime.utcnow()
+            db.session.add(ul)
+            db.session.commit()
+
+            broadcast_room_event(room.code, {'type': 'message', 'message': serialize_collab_message(assistant_msg)})
+
+    threading.Thread(target=runner, daemon=True).start()
+
+
+@chat_bp.get('/api/collab/rooms')
+def list_collab_rooms():
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    memberships = CollabMembership.query.filter_by(user_id=user_id).join(CollabRoom).order_by(CollabRoom.updated_at.desc()).all()
+    rooms = []
+    for membership in memberships:
+        room = membership.room
+        last_msg = CollabMessage.query.filter_by(room_id=room.id).order_by(CollabMessage.created_at.desc()).first()
+        snippet = ''
+        if last_msg and last_msg.content:
+            snippet = last_msg.content[:80] + ('...' if len(last_msg.content) > 80 else '')
+        rooms.append({
+            **serialize_room(room),
+            'last_message': snippet
+        })
+
+    return jsonify({'rooms': rooms})
+
+
+@chat_bp.post('/api/collab/rooms')
+def create_collab_room():
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip() or 'Közös szoba'
+    code = generate_room_code()
+    room = CollabRoom(code=code, name=name, created_by=user_id)
+    db.session.add(room)
+    db.session.commit()
+    ensure_membership(room, user_id)
+    return jsonify({'room': serialize_room(room)})
+
+
+@chat_bp.post('/api/collab/rooms/join')
+def join_collab_room():
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    data = request.get_json() or {}
+    code = (data.get('code') or '').strip().upper()
+    if not code:
+        return jsonify({'error': 'room code required'}), 400
+
+    room = CollabRoom.query.filter_by(code=code).first()
+    if not room:
+        return jsonify({'error': 'not found'}), 404
+
+    ensure_membership(room, user_id)
+    return jsonify({'room': serialize_room(room)})
+
+
+@chat_bp.post('/api/collab/rooms/<room_code>/leave')
+def leave_collab_room(room_code):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    room = CollabRoom.query.filter_by(code=room_code.upper()).first()
+    if not room:
+        return jsonify({'error': 'not found'}), 404
+
+    membership = CollabMembership.query.filter_by(room_id=room.id, user_id=user_id).first()
+    if not membership:
+        return jsonify({'left': True, 'deleted': False})
+
+    db.session.delete(membership)
+    db.session.commit()
+
+    remaining = CollabMembership.query.filter_by(room_id=room.id).count()
+    if remaining == 0:
+        CollabMessage.query.filter_by(room_id=room.id).delete()
+        db.session.delete(room)
+        db.session.commit()
+        broadcast_room_event(room.code, {'type': 'room_deleted'})
+        return jsonify({'left': True, 'deleted': True})
+
+    broadcast_room_event(room.code, {'type': 'member_left', 'user_id': user_id})
+    return jsonify({'left': True, 'deleted': False})
+
+
+@chat_bp.post('/api/collab/rooms/<room_code>/system-prompt')
+def update_system_prompt(room_code):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    room = CollabRoom.query.filter_by(code=room_code.upper()).first()
+    if not room:
+        return jsonify({'error': 'not found'}), 404
+
+    membership = CollabMembership.query.filter_by(room_id=room.id, user_id=user_id).first()
+    if not membership:
+        return jsonify({'error': 'not a member'}), 403
+
+    data = request.get_json() or {}
+    prompt = (data.get('system_prompt') or '').strip()
+    room.system_prompt = prompt
+    room.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    broadcast_room_event(room.code, {'type': 'system_prompt_updated', 'system_prompt': prompt})
+    return jsonify({'system_prompt': prompt})
+
+
+@chat_bp.post('/api/collab/rooms/<room_code>/clear')
+def clear_collab_chat(room_code):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    room = CollabRoom.query.filter_by(code=room_code.upper()).first()
+    if not room:
+        return jsonify({'error': 'not found'}), 404
+
+    membership = CollabMembership.query.filter_by(room_id=room.id, user_id=user_id).first()
+    if not membership:
+        return jsonify({'error': 'not a member'}), 403
+
+    CollabMessage.query.filter_by(room_id=room.id).delete()
+    room.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    broadcast_room_event(room.code, {'type': 'chat_cleared'})
+    return jsonify({'cleared': True})
+
+
+@chat_bp.get('/api/collab/rooms/<room_code>')
+def get_collab_room(room_code):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    room = CollabRoom.query.filter_by(code=room_code.upper()).first()
+    if not room:
+        return jsonify({'error': 'not found'}), 404
+
+    ensure_membership(room, user_id)
+    messages = CollabMessage.query.filter_by(room_id=room.id).order_by(CollabMessage.created_at.asc()).limit(200).all()
+    return jsonify({'room': serialize_room(room), 'messages': [serialize_collab_message(m) for m in messages]})
+
+
+@chat_bp.route('/api/collab/rooms/<room_code>/stream')
+def collab_room_stream(room_code):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    room = CollabRoom.query.filter_by(code=room_code.upper()).first()
+    if not room:
+        return jsonify({'error': 'not found'}), 404
+
+    user_id = session['user_id']
+    ensure_membership(room, user_id)
+
+    queue_obj = subscribe_room(room.code)
+
+    def event_stream():
+        try:
+            yield f"data: {json.dumps({'type': 'ready'})}\n\n"
+            while True:
+                try:
+                    event = queue_obj.get(timeout=20)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except Empty:
+                    yield 'data: {"type":"ping"}\n\n'
+        finally:
+            unsubscribe_room(room.code, queue_obj)
+
+    return Response(stream_with_context(event_stream()), mimetype='text/event-stream')
+
+
+@chat_bp.post('/api/collab/rooms/<room_code>/message')
+def post_collab_message(room_code):
+    if 'user_id' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    user_id = session['user_id']
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'user not found'}), 404
+
+    room = CollabRoom.query.filter_by(code=room_code.upper()).first()
+    if not room:
+        return jsonify({'error': 'not found'}), 404
+
+    ensure_membership(room, user_id)
+
+    data = request.get_json() or {}
+    content = (data.get('message') or '').strip()
+    if not content:
+        return jsonify({'error': 'message required'}), 400
+
+    user_key = user.user_key
+    now = datetime.utcnow()
+    if user_key and user_key.rate_limit_enabled and user_key.rate_limit_value > 0:
+        period_seconds = {'second': 1, 'minute': 60, 'hour': 3600, 'day': 86400}.get(user_key.rate_limit_period, 60)
+        start_time = now - timedelta(seconds=period_seconds)
+        count = db.session.query(func.count(UsageLog.id)).filter(UsageLog.user_key_id == user_key.id, UsageLog.ts >= start_time).scalar() or 0
+        if count >= user_key.rate_limit_value:
+            return jsonify({'error': 'rate_limit_exceeded'}), 429
+
+    msg = CollabMessage(room_id=room.id, user_id=user.id, role='user', content=content, meta={})
+    db.session.add(msg)
+    room.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    payload = serialize_collab_message(msg)
+    broadcast_room_event(room.code, {'type': 'message', 'message': payload})
+    start_collab_ai_response(room, user, content)
+
+    return jsonify({'message': payload})
 
 def get_upstream_config():
     upstream_key_env = os.getenv('UPSTREAM_API_KEY', '')

@@ -35,7 +35,7 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db.init_app(app)
 
-    from .models import ProviderKey, UsageLog, UserKey, CorsSettings, User, Conversation
+    from .models import ProviderKey, UsageLog, UserKey, CorsSettings, User, Conversation, CollabRoom, CollabMembership, CollabMessage
     with app.app_context():
         backup_database()
         db.create_all()

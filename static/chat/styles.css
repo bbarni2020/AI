@@ -1472,3 +1472,226 @@ body[data-mode-panel="manual"] .chat-messages {
     transform: translateY(-2px);
 }
 
+.collab-link {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+}
+
+.collab-app .room-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.room-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text-color);
+    outline: none;
+}
+
+.room-input:focus {
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+.pill-btn {
+    background: linear-gradient(135deg, #ffffff, #cfcfcf);
+    color: #000000;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(255, 255, 255, 0.15);
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    white-space: nowrap;
+}
+
+.pill-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+}
+
+.pill-btn.ghost {
+    background: transparent;
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    box-shadow: none;
+}
+
+.pill-btn.danger {
+    background: transparent;
+    color: #ff5f5f;
+    border: 1px solid rgba(255, 95, 95, 0.4);
+    box-shadow: none;
+}
+
+.pill-btn.danger:hover {
+    border-color: rgba(255, 95, 95, 0.7);
+    color: #ff7b7b;
+}
+
+.collab-actions-card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+}
+
+.collab-actions-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.collab-actions-title {
+    font-weight: 700;
+    letter-spacing: -0.2px;
+}
+
+.collab-actions-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.collab-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ffffff, #9e9e9e);
+    box-shadow: 0 0 0 6px rgba(255,255,255,0.05);
+}
+
+.collab-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    line-height: 1.4;
+}
+
+.collab-room-list {
+    margin-top: 6px;
+}
+
+.pill-btn.full {
+    width: 100%;
+    justify-content: center;
+}
+
+.collab-modal.hidden {
+    display: none;
+}
+
+.collab-modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.collab-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+}
+
+.collab-modal-dialog {
+    position: relative;
+    width: min(520px, 90vw);
+    background: linear-gradient(180deg, rgba(16,16,16,0.95), rgba(8,8,8,0.98));
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 18px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    z-index: 1;
+}
+
+.collab-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.collab-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.prompt-textarea {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--text-color);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+}
+
+.prompt-textarea:focus {
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+.collab-room-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px 8px;
+    position: sticky;
+    top: 0;
+    background: var(--bg-color);
+    z-index: 2;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.collab-room-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.room-title {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.room-code {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.collab-room-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.history-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.75;
+    margin-left: 6px;
+}
+
+.message.streaming .message-content {
+    opacity: 0.8;
+}
+

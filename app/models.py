@@ -82,3 +82,43 @@ class Conversation(db.Model):
     messages = db.Column(db.JSON, default=list, nullable=False)
 
     user = db.relationship('User', backref='conversations')
+
+
+class CollabRoom(db.Model):
+    __tablename__ = 'collab_rooms'
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(24), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    system_prompt = db.Column(db.Text, default='', nullable=False)
+
+    creator = db.relationship('User')
+
+
+class CollabMembership(db.Model):
+    __tablename__ = 'collab_memberships'
+    id = db.Column(db.Integer, primary_key=True)
+    room_id = db.Column(db.Integer, db.ForeignKey('collab_rooms.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    joined_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    room = db.relationship('CollabRoom', backref='memberships')
+    user = db.relationship('User')
+    __table_args__ = (db.UniqueConstraint('room_id', 'user_id', name='uq_collab_room_user'),)
+
+
+class CollabMessage(db.Model):
+    __tablename__ = 'collab_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    room_id = db.Column(db.Integer, db.ForeignKey('collab_rooms.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    role = db.Column(db.String(20), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    model = db.Column(db.String(256), nullable=True)
+    meta = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    room = db.relationship('CollabRoom', backref='messages')
+    user = db.relationship('User')
